@@ -50,7 +50,9 @@ enum class ErrorCode : uint16_t {
     InvalidLabel,
     SetFailed,
     ClearFailed,
-    ClearAllFailed
+    ClearAllFailed,
+    PolicyDenied,
+    RateLimited
 };
 
 static inline const char* errorCodeStr(ErrorCode code)
@@ -97,6 +99,8 @@ static inline const char* errorCodeStr(ErrorCode code)
     case ErrorCode::SetFailed: return "SetFailed";
     case ErrorCode::ClearFailed: return "ClearFailed";
     case ErrorCode::ClearAllFailed: return "ClearAllFailed";
+    case ErrorCode::PolicyDenied: return "PolicyDenied";
+    case ErrorCode::RateLimited: return "RateLimited";
     default: return "Unknown";
     }
 }
@@ -110,6 +114,7 @@ static inline bool errorCodeRetryable(ErrorCode code)
     case ErrorCode::IoError:
     case ErrorCode::InternalAckOverflow:
     case ErrorCode::CfgTruncated:
+    case ErrorCode::RateLimited:
         return true;
     default:
         return false;

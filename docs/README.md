@@ -8,6 +8,7 @@ Micronova ne font pas partie de cette edition.
 
 - [Mise en service et flash](integration/mise-en-service.md)
 - [Durcissement de securite](security-hardening.md)
+- [Compte, ACL et limites MQTT](mqtt-hardening.md)
 
 ## Architecture
 

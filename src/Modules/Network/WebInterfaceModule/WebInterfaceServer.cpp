@@ -2481,6 +2481,25 @@ static const char kWebInterfaceFallbackPage[] PROGMEM = R"HTML(
     <div class="status" id="status">Chargement...</div>
   </section>
 
+  <section class="wide" id="recoveryPanel" hidden>
+    <h2>Recuperation physique des acces</h2>
+    <p>
+      Le cavalier GPIO21-GND a ete detecte au demarrage. Tous les relais restent arretes
+      pendant cette fenetre. Choisissez de nouveaux identifiants Web, puis retirez le
+      cavalier avant le redemarrage.
+    </p>
+    <label for="recoveryUser">Utilisateur administrateur</label>
+    <input id="recoveryUser" value="admin" maxlength="32" autocomplete="username" />
+    <label for="recoveryPass">Nouveau mot de passe (12 a 32 caracteres)</label>
+    <input id="recoveryPass" type="password" minlength="12" maxlength="32" autocomplete="new-password" />
+    <label for="recoveryConfirm">Confirmation</label>
+    <input id="recoveryConfirm" type="password" minlength="12" maxlength="32" autocomplete="new-password" />
+    <div class="row">
+      <button id="saveWebAccess" type="button">Remplacer les acces Web</button>
+    </div>
+    <div class="status note" id="recoveryMsg">Fenetre de recuperation active.</div>
+  </section>
+
   <div class="grid">
     <section>
       <h2>Wi-Fi Supervisor</h2>
@@ -2497,7 +2516,7 @@ static const char kWebInterfaceFallbackPage[] PROGMEM = R"HTML(
       <div class="status" id="wifiMsg">-</div>
     </section>
 
-    <section>
+    <section id="fwConfigPanel">
       <h2>Serveur d'upgrade</h2>
       <label for="host">Hote HTTP</label>
       <input id="host" placeholder="192.168.1.10:8000" autocomplete="off" />
@@ -2514,7 +2533,7 @@ static const char kWebInterfaceFallbackPage[] PROGMEM = R"HTML(
       <div class="status" id="fwCfgMsg">-</div>
     </section>
 
-    <section class="wide">
+    <section class="wide" id="fwUpgradePanel">
       <h2>Upgrade de secours</h2>
       <p>Si une URL explicite est vide, l'updater utilise le serveur et les chemins configures ci-dessus.</p>
       <label for="supUrl">URL explicite firmware Supervisor</label>
@@ -2534,6 +2553,7 @@ static const char kWebInterfaceFallbackPage[] PROGMEM = R"HTML(
   const $ = (id) => document.getElementById(id);
   const status = $("status");
   const wifiMsg = $("wifiMsg");
+  const recoveryMsg = $("recoveryMsg");
   const fwCfgMsg = $("fwCfgMsg");
   const updateMsg = $("updateMsg");
   const buttons = Array.from(document.querySelectorAll("button"));
@@ -2575,12 +2595,26 @@ static const char kWebInterfaceFallbackPage[] PROGMEM = R"HTML(
   async function refreshAll() {
     setBusy(true);
     try {
-      const [meta, net, wifi, fw, fwst] = await Promise.all([
-        api("/api/web/meta").catch((e) => ({ ok:false, err:e.message })),
+      const meta = await api("/api/web/meta");
+      const recoveryActive = meta.physical_recovery_active === true;
+      $("recoveryPanel").hidden = !recoveryActive;
+      $("fwConfigPanel").hidden = recoveryActive;
+      $("fwUpgradePanel").hidden = recoveryActive;
+      if (recoveryActive) {
+        put(recoveryMsg,
+            `Fenetre active encore ${meta.physical_recovery_remaining_s || 0} s. ` +
+            "Le point d'acces est temporairement ouvert; retirez le cavalier avant le redemarrage.",
+            "note");
+      }
+      const [net, wifi, fw, fwst] = await Promise.all([
         api("/api/network/mode").catch((e) => ({ ok:false, err:e.message })),
         api("/api/wifi/config").catch((e) => ({ ok:false, err:e.message })),
-        api("/api/fwupdate/config").catch((e) => ({ ok:false, err:e.message })),
-        api("/api/fwupdate/status").catch((e) => ({ ok:false, err:e.message }))
+        recoveryActive
+          ? Promise.resolve({ ok:false, disabled:"physical_recovery" })
+          : api("/api/fwupdate/config").catch((e) => ({ ok:false, err:e.message })),
+        recoveryActive
+          ? Promise.resolve({ ok:false, disabled:"physical_recovery" })
+          : api("/api/fwupdate/status").catch((e) => ({ ok:false, err:e.message }))
       ]);
       if (wifi.ok !== false) {
         $("wifiEnabled").checked = wifi.enabled !== false;
@@ -2597,6 +2631,34 @@ static const char kWebInterfaceFallbackPage[] PROGMEM = R"HTML(
     } catch (e) {
       put(status, e.message, "bad");
     } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveWebAccess() {
+    const user = $("recoveryUser").value.trim();
+    const pass = $("recoveryPass").value;
+    const confirmPass = $("recoveryConfirm").value;
+    if (!user || pass.length < 12 || pass.length > 32 || pass !== confirmPass) {
+      put(recoveryMsg,
+          "Utilisateur requis; mot de passe de 12 a 32 caracteres et confirmation identique.",
+          "bad");
+      return;
+    }
+    if (!confirm("Remplacer les acces Web et redemarrer ? Retirez le cavalier GPIO21-GND avant le redemarrage.")) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const out = await api("/api/recovery/web-credentials", {
+        method: "POST",
+        body: formBody({ user, pass, confirm: confirmPass })
+      });
+      put(recoveryMsg,
+          `Acces remplaces. Retirez maintenant le cavalier GPIO21-GND. Redemarrage dans ${out.reboot_in_s || 8} s.`,
+          "ok");
+    } catch (e) {
+      put(recoveryMsg, e.message, "bad");
       setBusy(false);
     }
   }
@@ -2725,12 +2787,12 @@ static const char kWebInterfaceFallbackPage[] PROGMEM = R"HTML(
   $("refresh").addEventListener("click", refreshAll);
   $("scan").addEventListener("click", scanWifi);
   $("saveWifi").addEventListener("click", saveWifi);
+  $("saveWebAccess").addEventListener("click", saveWebAccess);
   $("saveFwCfg").addEventListener("click", saveFwConfig);
   $("checkManifest").addEventListener("click", checkManifest);
   $("updateSpiffs").addEventListener("click", () => startUpdate("spiffs"));
   $("updateSupervisor").addEventListener("click", () => startUpdate("supervisor"));
   refreshAll();
-  pollStatus();
 })();
 </script>
 </body>
@@ -3303,8 +3365,8 @@ void WebInterfaceModule::startServer_()
                spiffsAssetExists("/webinterface/app-core.css");
     };
 
-    server_.on("/", HTTP_GET, [webInterfaceLandingUrl](AsyncWebServerRequest* request) {
-        request->redirect(webInterfaceLandingUrl());
+    server_.on("/", HTTP_GET, [this, webInterfaceLandingUrl](AsyncWebServerRequest* request) {
+        request->redirect(physicalRecoveryActive_() ? "/rescue" : webInterfaceLandingUrl());
     });
 
     server_.on("/rescue", HTTP_GET, [sendRescuePage](AsyncWebServerRequest* request) {
@@ -3602,14 +3664,18 @@ void WebInterfaceModule::startServer_()
     });
     server_.on("/api/web/meta", HTTP_GET, [this](AsyncWebServerRequest* request) {
         HttpLatencyScope latency(request, "/api/web/meta");
-        StaticJsonDocument<640> doc;
+        StaticJsonDocument<832> doc;
         NetworkAccessMode mode = NetworkAccessMode::None;
-        if (!netAccessSvc_ && services_) {
+        const bool recoveryActive = physicalRecoveryActive_();
+        if (recoveryActive) {
+            mode = NetworkAccessMode::AccessPoint;
+        } else if (!netAccessSvc_ && services_) {
             netAccessSvc_ = services_->get<NetworkAccessService>(ServiceId::NetworkAccess);
         }
-        if (netAccessSvc_ && netAccessSvc_->mode) {
+        if (!recoveryActive && netAccessSvc_ && netAccessSvc_->mode) {
             mode = netAccessSvc_->mode(netAccessSvc_->ctx);
-        } else if (wifiSvc_ && wifiSvc_->isConnected && wifiSvc_->isConnected(wifiSvc_->ctx)) {
+        } else if (!recoveryActive &&
+                   wifiSvc_ && wifiSvc_->isConnected && wifiSvc_->isConnected(wifiSvc_->ctx)) {
             mode = NetworkAccessMode::Station;
         }
         const char* modeTxt = "none";
@@ -3624,6 +3690,11 @@ void WebInterfaceModule::startServer_()
         doc["network_mode"] = modeTxt;
         doc["is_ap_portal"] = (mode == NetworkAccessMode::AccessPoint);
         doc["csrf_token"] = csrfToken_;
+        doc["physical_recovery_active"] = recoveryActive;
+        doc["physical_recovery_remaining_s"] =
+            (physicalRecoveryRemainingMs_() + 999U) / 1000U;
+        doc["physical_recovery_gpio"] = FLOW_PHYSICAL_RECOVERY_PIN;
+        doc["physical_recovery_ap_open"] = recoveryActive;
 #if defined(FLOW_PROFILE_MICRONOVA)
         doc["local_runtime"] = true;
         doc["local_config_label"] = "Config Store Micronova";
@@ -3648,7 +3719,7 @@ void WebInterfaceModule::startServer_()
         heap["largest"] = snap.heap.largestFreeBlock;
         heap["frag"] = snap.heap.fragPercent;
 
-        char out[704] = {0};
+        char out[896] = {0};
         const size_t n = serializeJson(doc, out, sizeof(out));
         if (n == 0 || n >= sizeof(out)) {
             request->send(500, "application/json",
@@ -3660,6 +3731,83 @@ void WebInterfaceModule::startServer_()
         addNoCacheHeaders_(response);
         request->send(response);
     });
+    server_.on("/api/recovery/status", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        HttpLatencyScope latency(request, "/api/recovery/status");
+        const bool active = physicalRecoveryActive_();
+        char out[192] = {0};
+        const int n = snprintf(out,
+                               sizeof(out),
+                               "{\"ok\":true,\"active\":%s,\"remaining_s\":%lu,"
+                               "\"gpio\":%d,\"ap_open\":%s}",
+                               active ? "true" : "false",
+                               (unsigned long)((physicalRecoveryRemainingMs_() + 999U) / 1000U),
+                               (int)FLOW_PHYSICAL_RECOVERY_PIN,
+                               active ? "true" : "false");
+        request->send(200,
+                      "application/json",
+                      (n > 0 && (size_t)n < sizeof(out))
+                          ? out
+                          : "{\"ok\":false,\"err\":{\"code\":\"Failed\",\"where\":\"recovery.status\"}}");
+    });
+    server_.on("/api/recovery/web-credentials", HTTP_POST, [this](AsyncWebServerRequest* request) {
+        HttpLatencyScope latency(request, "/api/recovery/web-credentials");
+        if (!physicalRecoveryActive_()) {
+            request->send(403,
+                          "application/json",
+                          "{\"ok\":false,\"err\":{\"code\":\"RecoveryInactive\",\"where\":\"recovery.credentials\"}}");
+            return;
+        }
+        if (!cfgStore_) {
+            request->send(503,
+                          "application/json",
+                          "{\"ok\":false,\"err\":{\"code\":\"NotReady\",\"where\":\"recovery.credentials\"}}");
+            return;
+        }
+
+        char user[sizeof(webSecurity_.user)] = {0};
+        char pass[sizeof(webSecurity_.pass)] = {0};
+        char confirm[sizeof(webSecurity_.pass)] = {0};
+        copyRequestParamValue_(request, "user", true, user, sizeof(user), "admin");
+        copyRequestParamValue_(request, "pass", true, pass, sizeof(pass), "");
+        copyRequestParamValue_(request, "confirm", true, confirm, sizeof(confirm), "");
+
+        const size_t userLen = strnlen(user, sizeof(user));
+        const size_t passLen = strnlen(pass, sizeof(pass));
+        if (userLen == 0U || userLen > 32U || passLen < 12U || passLen > 32U ||
+            strcmp(pass, confirm) != 0 ||
+            strchr(user, '\r') || strchr(user, '\n') ||
+            strchr(pass, '\r') || strchr(pass, '\n')) {
+            request->send(
+                400,
+                "application/json",
+                "{\"ok\":false,\"err\":{\"code\":\"InvalidCredentials\","
+                "\"where\":\"recovery.credentials\","
+                "\"msg\":\"Utilisateur 1-32 caracteres; mot de passe 12-32 caracteres identique a la confirmation.\"}}");
+            return;
+        }
+
+        if (!cfgStore_->set(webAdminUserVar_, user) ||
+            !cfgStore_->set(webAdminPassVar_, pass)) {
+            request->send(500,
+                          "application/json",
+                          "{\"ok\":false,\"err\":{\"code\":\"Failed\",\"where\":\"recovery.credentials\"}}");
+            return;
+        }
+        webCredentialsReady_ = true;
+        portENTER_CRITICAL(&webAuthThrottleMux_);
+        memset(webAuthThrottle_, 0, sizeof(webAuthThrottle_));
+        webAuthGlobalWindowStartMs_ = 0U;
+        webAuthGlobalBlockedUntilMs_ = 0U;
+        webAuthGlobalFailures_ = 0U;
+        portEXIT_CRITICAL(&webAuthThrottleMux_);
+
+        scheduleReboot_(8000U, "recovery.done");
+        LOGW("Physical recovery replaced web administrator credentials; remove GPIO jumper before reboot");
+        request->send(200,
+                      "application/json",
+                      "{\"ok\":true,\"reboot_scheduled\":true,\"reboot_in_s\":8,"
+                      "\"remove_jumper\":true}");
+    });
     server_.on("/webinterface", HTTP_GET, [this,
                                            spiffsAssetExists,
                                            beginSpiffsAssetResponse,
@@ -3668,6 +3816,10 @@ void WebInterfaceModule::startServer_()
                                            lightUiAssetsAvailable,
                                            fullUiAssetsAvailable](AsyncWebServerRequest* request) {
         HttpLatencyScope latency(request, "/webinterface");
+        if (physicalRecoveryActive_()) {
+            sendRescuePage(request);
+            return;
+        }
         NetworkAccessMode mode = NetworkAccessMode::None;
         if (!netAccessSvc_ && services_) {
             netAccessSvc_ = services_->get<NetworkAccessService>(ServiceId::NetworkAccess);
@@ -3759,12 +3911,16 @@ void WebInterfaceModule::startServer_()
     server_.on("/api/network/mode", HTTP_GET, [this](AsyncWebServerRequest* request) {
         HttpLatencyScope latency(request, "/api/network/mode");
         NetworkAccessMode mode = NetworkAccessMode::None;
-        if (!netAccessSvc_ && services_) {
+        const bool recoveryActive = physicalRecoveryActive_();
+        if (recoveryActive) {
+            mode = NetworkAccessMode::AccessPoint;
+        } else if (!netAccessSvc_ && services_) {
             netAccessSvc_ = services_->get<NetworkAccessService>(ServiceId::NetworkAccess);
         }
-        if (netAccessSvc_ && netAccessSvc_->mode) {
+        if (!recoveryActive && netAccessSvc_ && netAccessSvc_->mode) {
             mode = netAccessSvc_->mode(netAccessSvc_->ctx);
-        } else if (wifiSvc_ && wifiSvc_->isConnected && wifiSvc_->isConnected(wifiSvc_->ctx)) {
+        } else if (!recoveryActive &&
+                   wifiSvc_ && wifiSvc_->isConnected && wifiSvc_->isConnected(wifiSvc_->ctx)) {
             mode = NetworkAccessMode::Station;
         }
 
@@ -6316,13 +6472,44 @@ void WebInterfaceModule::noteWebAuthSuccess_(AsyncWebServerRequest* request)
 
 bool WebInterfaceModule::allowUnauthenticatedProvisioning_(AsyncWebServerRequest* request) const
 {
-    if (!request || !netAccessSvc_ || !netAccessSvc_->mode ||
+    if (!request) return false;
+
+    const String& url = request->url();
+    const WebRequestMethodComposite method = request->method();
+    if (physicalRecoveryActive_()) {
+        if (method == HTTP_GET) {
+            return url == "/" ||
+                   url == "/rescue" ||
+                   url == "/webinterface" ||
+                   url == "/webinterface/" ||
+                   url == "/webinterface/rescue" ||
+                   url == "/generate_204" ||
+                   url == "/gen_204" ||
+                   url == "/hotspot-detect.html" ||
+                   url == "/connecttest.txt" ||
+                   url == "/ncsi.txt" ||
+                   url == "/api/web/meta" ||
+                   url == "/api/recovery/status" ||
+                   url == "/api/network/mode" ||
+                   url == "/api/wifi/ap" ||
+                   url == "/api/wifi/config" ||
+                   url == "/api/wifi/scan" ||
+                   url == "/api/mqtt/config";
+        }
+        if (method == HTTP_POST) {
+            return url == "/api/recovery/web-credentials" ||
+                   url == "/api/wifi/config" ||
+                   url == "/api/wifi/scan" ||
+                   url == "/api/mqtt/config";
+        }
+        return false;
+    }
+
+    if (!netAccessSvc_ || !netAccessSvc_->mode ||
         netAccessSvc_->mode(netAccessSvc_->ctx) != NetworkAccessMode::AccessPoint) {
         return false;
     }
 
-    const String& url = request->url();
-    const WebRequestMethodComposite method = request->method();
     if (method == HTTP_GET) {
         if (url == "/" ||
             url == "/generate_204" ||
@@ -6364,6 +6551,21 @@ bool WebInterfaceModule::getNetworkIp_(char* out, size_t len, NetworkAccessMode*
     if (out && len > 0) out[0] = '\0';
     if (modeOut) *modeOut = NetworkAccessMode::None;
     if (!out || len == 0) return false;
+
+    if (physicalRecoveryActive_()) {
+        const IPAddress apIp = WiFi.softAPIP();
+        if ((uint32_t)apIp != 0U) {
+            snprintf(out,
+                     len,
+                     "%u.%u.%u.%u",
+                     (unsigned)apIp[0],
+                     (unsigned)apIp[1],
+                     (unsigned)apIp[2],
+                     (unsigned)apIp[3]);
+            if (modeOut) *modeOut = NetworkAccessMode::AccessPoint;
+            return out[0] != '\0';
+        }
+    }
 
     if (netAccessSvc_ && netAccessSvc_->getIP) {
         if (netAccessSvc_->getIP(netAccessSvc_->ctx, out, len)) {

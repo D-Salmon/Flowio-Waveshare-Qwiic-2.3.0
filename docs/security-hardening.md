@@ -23,6 +23,25 @@ Its WPA2 password comes from `FLOW_PROVISIONING_AP_PASSWORD`, or is generated
 randomly at boot and printed to the physical serial console when that build-time
 value is empty. The former shared `flowio1234` password is no longer used.
 
+## Physical access recovery
+
+The Waveshare profile reserves `GPIO21` for physical recovery. Holding it to
+`GND` continuously for 500 ms during boot starts the open
+`FlowIO-RECOVERY-xxxxxx` access point for ten minutes. The embedded rescue page
+at `http://192.168.4.1/rescue` can then replace the Web administrator
+credentials and, when needed, update Wi-Fi or MQTT settings.
+
+Recovery does not expose firmware update, diagnostics, reset or operational
+control routes. All pool-device outputs are held off and ON requests are
+rejected for the duration of the window. The jumper must be removed before the
+scheduled reboot; leaving it fitted requests a new recovery window on every
+boot.
+
+The recovery AP is intentionally open. Its security boundary is physical access
+to the controller plus the short boot-time and ten-minute windows, not a shared
+fallback password. Do not leave the jumper installed, and keep the enclosure
+physically controlled.
+
 Digest authentication prevents sending the password itself in clear text, but
 HTTP traffic is not encrypted. Put the device on a trusted management VLAN and
 do not expose port 80 to the Internet.
@@ -61,6 +80,23 @@ verification before the network update switch is enabled.
 
 MQTT uses `mqtts://`, the ESP certificate bundle and port 8883 by default.
 Explicit `mqtt://` configuration is rejected while `FLOW_MQTT_REQUIRE_TLS=1`.
+When `FLOW_MQTT_REQUIRE_AUTH=1` (the release default), the firmware also refuses
+to connect if either the MQTT username or password is empty.
+
+Inbound MQTT traffic is limited to 12 accepted messages per 10-second window.
+The next message starts a 60-second block. Rejections are counted in the MQTT RX
+drop metrics and logged without payloads or secrets; repeated block reports are
+spaced by five seconds.
+
+MQTT commands that start an update (`fw.update.*`, except the read-only
+`fw.update.status`) are denied. Defensive aliases for full configuration import
+or restore are denied as well. `cfg/set`, Home Assistant controls, reboot and
+factory-reset commands remain available by explicit product choice.
+
+Broker-side controls are still required: a unique account per Flow.io device,
+anonymous access disabled and ACLs restricted to that device's topic tree and
+its own Home Assistant discovery node. See
+[mqtt-hardening.md](mqtt-hardening.md).
 
 The optional remote-display HMI UDP transport has been removed. The firmware
 does not open UDP port 42110; the local Nextion remains connected over UART.

@@ -19,21 +19,23 @@ depuis Internet.
 
 1. Valider la version sur le materiel reel:
    - demarrage et recuperation des identifiants sur la console serie;
+   - cavalier `GPIO21`-`GND`, AP `FlowIO-RECOVERY`, remplacement des acces,
+     extinction effective des huit relais et fermeture apres dix minutes;
    - Wi-Fi, Ethernet et MQTT TLS;
    - interface Web et SPIFFS;
    - ecran Nextion et liaison HMI;
    - bus Qwiic, DS2484, ADS1115 et sondes;
    - huit relais, retours de contacteurs et securites filtration/electrolyseur;
    - redemarrage et persistance de la configuration.
-2. Ajouter un mecanisme de recuperation physique des acces, par bouton ou
-   cavalier, limite dans le temps et sans mot de passe de secours permanent.
-3. Documenter la procedure de mise en service, de sauvegarde et de restauration
+2. Documenter la procedure de mise en service, de sauvegarde et de restauration
    pour les installateurs.
 
 ## Securite avant production
 
-1. Restreindre MQTT avec des ACL uniques par appareil et, pour les commandes
-   sensibles, une signature avec nonce, timestamp et protection anti-rejeu.
+1. Creer sur le broker un compte propre a chaque appareil, interdire les
+   connexions anonymes et appliquer les ACL de `docs/mqtt-hardening.md`.
+   Le firmware refuse deja les identifiants vides, limite les rafales et
+   interdit par MQTT les mises a jour et imports de configuration.
 2. Remplacer l'OTA non signee actuellement desactivee par une OTA HTTPS signee,
    avec verification cryptographique, rollback et protection anti-downgrade.
 3. Preparer Secure Boot v2, le chiffrement flash/NVS et une procedure de
@@ -58,7 +60,6 @@ depuis Internet.
 ## Ordre recommande
 
 1. Essais materiels complets.
-2. Recuperation physique des acces.
-3. Durcissement MQTT.
-4. OTA signee.
-5. Secure Boot, chiffrement et procedure de fabrication.
+2. Compte et ACL MQTT sur le broker, puis essai de la limitation firmware.
+3. OTA signee.
+4. Secure Boot, chiffrement et procedure de fabrication.

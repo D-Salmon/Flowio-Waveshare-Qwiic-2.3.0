@@ -26,6 +26,14 @@
 #define FLOW_ENABLE_READONLY_SERIAL_LOG 1
 #endif
 
+#ifndef FLOW_PHYSICAL_RECOVERY_PIN
+#define FLOW_PHYSICAL_RECOVERY_PIN 21
+#endif
+
+#ifndef FLOW_PHYSICAL_RECOVERY_WINDOW_MS
+#define FLOW_PHYSICAL_RECOVERY_WINDOW_MS 600000U
+#endif
+
 struct BoardSpec;
 
 class WebInterfaceModule : public Module {
@@ -75,6 +83,7 @@ public:
     void loop() override;
     void setProvisioningOnly(bool enabled) { provisioningOnly_ = enabled; }
     bool provisioningOnly() const { return provisioningOnly_; }
+    void setPhysicalRecoveryRequested(bool requested);
 
 private:
     static constexpr int kServerPort = 80;
@@ -109,6 +118,8 @@ private:
     void noteWebAuthFailure_(AsyncWebServerRequest* request);
     void noteWebAuthSuccess_(AsyncWebServerRequest* request);
     bool allowUnauthenticatedProvisioning_(AsyncWebServerRequest* request) const;
+    bool physicalRecoveryActive_() const;
+    uint32_t physicalRecoveryRemainingMs_() const;
     void ensureCsrfToken_();
     bool csrfRequestAllowed_(AsyncWebServerRequest* request) const;
     bool requestOriginAllowed_(AsyncWebServerRequest* request, bool originRequired) const;
@@ -220,6 +231,8 @@ private:
     bool provisioningOnly_ = false;
     bool provisioningDisableAfterConfigured_ = false;
     bool provisioningRequireMqttForConfigured_ = false;
+    bool physicalRecoveryRequested_ = false;
+    uint32_t physicalRecoveryDeadlineMs_ = 0U;
     bool rebootPending_ = false;
     uint32_t rebootAtMs_ = 0;
     char rebootReason_[24] = {0};

@@ -17,6 +17,10 @@
 #define FLOW_MQTT_REQUIRE_TLS 1
 #endif
 
+#ifndef FLOW_MQTT_REQUIRE_AUTH
+#define FLOW_MQTT_REQUIRE_AUTH 1
+#endif
+
 #define LOG_MODULE_ID ((LogModuleId)LogModuleIdValue::MQTTModule)
 #include "Core/ModuleLog.h"
 
@@ -55,6 +59,13 @@ bool MQTTModule::ensureClient_()
         LOGW("mqtt cfg invalid: empty host");
         return false;
     }
+
+#if FLOW_MQTT_REQUIRE_AUTH
+    if (cfgData_.user[0] == '\0' || cfgData_.pass[0] == '\0') {
+        LOGW("mqtt cfg rejected: non-empty username and password are required");
+        return false;
+    }
+#endif
 
     const char* brokerHost = cfgData_.host;
     bool useTls = FLOW_MQTT_REQUIRE_TLS != 0;

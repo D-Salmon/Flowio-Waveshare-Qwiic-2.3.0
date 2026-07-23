@@ -275,6 +275,11 @@ void MQTTModule::init(ConfigStore& cfg, ServiceRegistry& services)
     parseFailCount_ = 0;
     handlerFailCount_ = 0;
     oversizeDropCount_ = 0;
+    inboundWindowStartMs_ = 0U;
+    inboundBlockedUntilMs_ = 0U;
+    inboundLastRejectReportMs_ = 0U;
+    inboundRateLimitedCount_ = 0U;
+    inboundAcceptedInWindow_ = 0U;
     syncRxMetrics_();
 
     if (!services.add(ServiceId::Mqtt, &mqttSvc_)) {

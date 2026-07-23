@@ -24,6 +24,11 @@ Payload attendu:
 Réponse:
 - `<base>/<device>/ack`
 
+Le firmware refuse sur ce topic les commandes qui lancent `fw.update.*`
+(`fw.update.status` reste autorisee) ainsi que les imports/restaurations
+complets de configuration. Les commandes Home Assistant, reboot et factory
+reset restent disponibles.
+
 ### `cfg/set`
 
 Payload patch config multi-modules:
@@ -32,6 +37,10 @@ Payload patch config multi-modules:
 ```
 Réponse:
 - `<base>/<device>/cfg/ack`
+
+`cfg/set` reste volontairement actif. L'ensemble des entrees MQTT partage une
+limite de 12 messages en 10 secondes, suivie d'un blocage de 60 secondes en cas
+de depassement.
 
 ## TX (publication unifiée)
 

@@ -77,8 +77,20 @@ Topics souscrits:
 Pipeline RX:
 1. callback IDF `MQTT_EVENT_DATA`
 2. copie vers queue RX bornée (`RxMsg`)
-3. traitement dans la task `mqtt`
-4. ACK/erreur sur `ack` ou `cfg/ack`
+3. limitation globale des messages entrants
+4. filtrage des commandes interdites par origine MQTT
+5. traitement dans la task `mqtt`
+6. ACK/erreur sur `ack` ou `cfg/ack`
+
+Durcissement RX:
+- utilisateur et mot de passe non vides obligatoires avec
+  `FLOW_MQTT_REQUIRE_AUTH=1`
+- 12 messages acceptes par fenetre de `10 s`
+- le message suivant bloque les entrees pendant `60 s`
+- `fw.update.*` refuse, sauf `fw.update.status`
+- imports/restaurations complets refuses
+- `cfg/set`, commandes HA, reboot et factory reset conserves
+- journalisation des noms/topics sans journaliser les payloads
 
 Queue RX:
 - longueur: `Limits::Mqtt::Capacity::RxQueueLen` (`8`)

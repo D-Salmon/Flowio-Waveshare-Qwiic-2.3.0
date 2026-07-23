@@ -19,8 +19,17 @@
 #define FLOW_PROVISIONING_AP_PASSWORD ""
 #endif
 
+#ifndef FLOW_PHYSICAL_RECOVERY_WINDOW_MS
+#define FLOW_PHYSICAL_RECOVERY_WINDOW_MS 600000U
+#endif
+
 namespace {
 WifiProvisioningModule* gWifiProvisioningInstance = nullptr;
+}
+
+void WifiProvisioningModule::setPhysicalRecoveryRequested(bool requested)
+{
+    physicalRecoveryRequested_ = requested;
 }
 
 void WifiProvisioningModule::init(ConfigStore& cfg, ServiceRegistry& services)
@@ -28,6 +37,10 @@ void WifiProvisioningModule::init(ConfigStore& cfg, ServiceRegistry& services)
     cfgStore_ = &cfg;
     wifiSvc_ = services.get<WifiService>(ServiceId::Wifi);
     bootMs_ = millis();
+    physicalRecoveryActive_ = physicalRecoveryRequested_;
+    physicalRecoveryDeadlineMs_ = physicalRecoveryActive_
+        ? bootMs_ + (uint32_t)FLOW_PHYSICAL_RECOVERY_WINDOW_MS
+        : 0U;
     lastCfgPollMs_ = 0;
     buildApCredentials_();
 
@@ -41,6 +54,10 @@ void WifiProvisioningModule::init(ConfigStore& cfg, ServiceRegistry& services)
     LOGI("Provisioning overlay initialized (timeout=%lu ms, AP SSID=%s)",
          (unsigned long)kConnectTimeoutMs,
          apSsid_);
+    if (physicalRecoveryActive_) {
+        LOGW("Physical access recovery enabled window_ms=%lu AP is temporarily open",
+             (unsigned long)FLOW_PHYSICAL_RECOVERY_WINDOW_MS);
+    }
 }
 
 void WifiProvisioningModule::onConfigLoaded(ConfigStore&, ServiceRegistry& services)
@@ -55,6 +72,10 @@ void WifiProvisioningModule::onConfigLoaded(ConfigStore&, ServiceRegistry& servi
          (int)ethernetEnabled_,
          (int)wifiEnabled_,
          (int)wifiConfigured_);
+    if (physicalRecoveryActive_) {
+        ensurePortalStarted_();
+        return;
+    }
     if (ethernetEnabled_) return;
 #if defined(FLOW_PROFILE_MICRONOVA)
     LOGI("Provisioning portal start deferred");
@@ -79,8 +100,24 @@ void WifiProvisioningModule::loop()
         refreshWifiConfig_();
     }
 
+    if (physicalRecoveryActive_) {
+        if (!isPhysicalRecoveryActive_(now)) {
+            physicalRecoveryActive_ = false;
+            physicalRecoveryDeadlineMs_ = 0U;
+            portalLatched_ = false;
+            if (apActive_) stopCaptivePortal_("physical recovery window elapsed");
+            configDirty_ = true;
+            LOGW("Physical access recovery window closed");
+        } else {
+            ensurePortalStarted_();
+            if (apActive_) dns_.processNextRequest();
+            vTaskDelay(pdMS_TO_TICKS(20));
+            return;
+        }
+    }
+
     if (ethernetEnabled_) {
-        if (apActive_) stopCaptivePortal_();
+        if (apActive_) stopCaptivePortal_("ethernet configured");
         portalLatched_ = false;
         vTaskDelay(pdMS_TO_TICKS(250));
         return;
@@ -89,7 +126,7 @@ void WifiProvisioningModule::loop()
     const bool staConnected = isStaConnected_();
     if (staConnected) {
         if (apActive_) {
-            stopCaptivePortal_();
+            stopCaptivePortal_("station connected");
         }
         portalLatched_ = false;
         vTaskDelay(pdMS_TO_TICKS(250));
@@ -109,8 +146,8 @@ void WifiProvisioningModule::loop()
 void WifiProvisioningModule::ensurePortalStarted_()
 {
     if (apActive_ || portalLatched_) return;
-    if (ethernetEnabled_) return;
-    if (isStaConnected_()) return;
+    if (!physicalRecoveryActive_ && ethernetEnabled_) return;
+    if (!physicalRecoveryActive_ && isStaConnected_()) return;
 
     const PortalReason reason = evaluatePortalReason_();
     if (reason == PortalReason::None) return;
@@ -164,6 +201,15 @@ void WifiProvisioningModule::buildApCredentials_()
     const uint8_t b0 = (uint8_t)(chipId >> 16);
     const uint8_t b1 = (uint8_t)(chipId >> 8);
     const uint8_t b2 = (uint8_t)(chipId >> 0);
+    if (physicalRecoveryRequested_) {
+        snprintf(apSsid_, sizeof(apSsid_), "FlowIO-RECOVERY-%02X%02X%02X", b0, b1, b2);
+        apPass_[0] = '\0';
+        Serial.printf("\r\n[SECURITY] Flow.io physical recovery AP: ssid=%s open_for_seconds=%lu\r\n",
+                      apSsid_,
+                      (unsigned long)((uint32_t)FLOW_PHYSICAL_RECOVERY_WINDOW_MS / 1000U));
+        return;
+    }
+
     snprintf(apSsid_, sizeof(apSsid_), "FlowIO-%s-%02X%02X%02X", FLOW_BUILD_PROFILE_NAME, b0, b1, b2);
 
     const char* configuredPassword = FLOW_PROVISIONING_AP_PASSWORD;
@@ -226,6 +272,9 @@ void WifiProvisioningModule::refreshWifiConfig_()
 
 WifiProvisioningModule::PortalReason WifiProvisioningModule::evaluatePortalReason_() const
 {
+    if (physicalRecoveryActive_) {
+        return PortalReason::PhysicalRecovery;
+    }
     if (!wifiConfigured_) {
         return PortalReason::MissingCredentials;
     }
@@ -238,14 +287,16 @@ WifiProvisioningModule::PortalReason WifiProvisioningModule::evaluatePortalReaso
 bool WifiProvisioningModule::startCaptivePortal_(PortalReason reason)
 {
     if (apActive_) return true;
-    if (ethernetEnabled_) return false;
+    if (ethernetEnabled_ && reason != PortalReason::PhysicalRecovery) return false;
 
     if (wifiSvc_ && wifiSvc_->setStaRetryEnabled) {
         (void)wifiSvc_->setStaRetryEnabled(wifiSvc_->ctx, false);
     }
 
     WiFi.mode(WIFI_MODE_AP);
-    const bool ok = WiFi.softAP(apSsid_, apPass_);
+    const bool openRecoveryAp =
+        reason == PortalReason::PhysicalRecovery && apPass_[0] == '\0';
+    const bool ok = openRecoveryAp ? WiFi.softAP(apSsid_) : WiFi.softAP(apSsid_, apPass_);
     if (!ok) {
         LOGE("Cannot start AP portal");
         return false;
@@ -258,7 +309,10 @@ bool WifiProvisioningModule::startCaptivePortal_(PortalReason reason)
     lastStaProbeStartMs_ = millis();
     refreshApClientState_(lastStaProbeStartMs_, false);
 
-    const char* reasonTxt = (reason == PortalReason::MissingCredentials) ? "missing credentials" : "connect timeout";
+    const char* reasonTxt =
+        (reason == PortalReason::MissingCredentials) ? "missing credentials" :
+        (reason == PortalReason::PhysicalRecovery) ? "physical recovery" :
+                                                     "connect timeout";
     LOGW("Provisioning AP started (%s) SSID=%s IP=%u.%u.%u.%u",
          reasonTxt,
          apSsid_,
@@ -266,11 +320,11 @@ bool WifiProvisioningModule::startCaptivePortal_(PortalReason reason)
     return true;
 }
 
-void WifiProvisioningModule::stopCaptivePortal_()
+void WifiProvisioningModule::stopCaptivePortal_(const char* reason)
 {
     if (!apActive_) return;
 
-    stopStaProbe_("sta connected");
+    stopStaProbe_(reason);
     if (wifiSvc_ && wifiSvc_->setStaRetryEnabled) {
         (void)wifiSvc_->setStaRetryEnabled(wifiSvc_->ctx, true);
     }
@@ -280,7 +334,14 @@ void WifiProvisioningModule::stopCaptivePortal_()
     apClientCount_ = 0;
     lastApClientSeenMs_ = 0;
     lastApClientPollMs_ = 0;
-    LOGI("Provisioning AP stopped (STA connected)");
+    LOGI("Provisioning AP stopped (%s)", reason ? reason : "requested");
+}
+
+bool WifiProvisioningModule::isPhysicalRecoveryActive_(uint32_t nowMs) const
+{
+    return physicalRecoveryActive_ &&
+           physicalRecoveryDeadlineMs_ != 0U &&
+           (int32_t)(physicalRecoveryDeadlineMs_ - nowMs) > 0;
 }
 
 void WifiProvisioningModule::onWifiEventSys_(arduino_event_t* event)

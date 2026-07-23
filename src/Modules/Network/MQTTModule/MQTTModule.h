@@ -268,6 +268,11 @@ private:
     uint32_t parseFailCount_ = 0;
     uint32_t handlerFailCount_ = 0;
     uint32_t oversizeDropCount_ = 0;
+    uint32_t inboundWindowStartMs_ = 0;
+    uint32_t inboundBlockedUntilMs_ = 0;
+    uint32_t inboundLastRejectReportMs_ = 0;
+    uint32_t inboundRateLimitedCount_ = 0;
+    uint8_t inboundAcceptedInWindow_ = 0;
     uint32_t lastEnqueueRejectLogMs_ = 0;
     uint32_t occLastReportMs_ = 0;
     uint16_t occMaxJobs_ = 0;
@@ -314,6 +319,7 @@ private:
     void processRxCmd_(const RxMsg& msg);
     void processRxCfgSet_(const RxMsg& msg);
     void publishRxError_(const char* ackTopicSuffix, ErrorCode code, const char* where, bool parseFailure);
+    bool admitInbound_(const char* topic, uint32_t nowMs, bool& reportRejection);
     void syncRxMetrics_();
     void countRxDrop_();
     void countOversizeDrop_();

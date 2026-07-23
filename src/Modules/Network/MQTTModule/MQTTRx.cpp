@@ -12,8 +12,112 @@
 #include <ArduinoJson.h>
 #include <string.h>
 
+#define LOG_MODULE_ID ((LogModuleId)LogModuleIdValue::MQTTModule)
+#include "Core/ModuleLog.h"
+
+namespace {
+bool mqttCommandDeniedByPolicy_(const char* cmd)
+{
+    if (!cmd || cmd[0] == '\0') return false;
+    if (strncmp(cmd, "fw.update.", 10U) == 0 &&
+        strcmp(cmd, "fw.update.status") != 0) {
+        return true;
+    }
+    return strcmp(cmd, "config.import") == 0 ||
+           strcmp(cmd, "config.restore") == 0 ||
+           strcmp(cmd, "cfg.import") == 0 ||
+           strcmp(cmd, "cfg.restore") == 0;
+}
+
+bool mqttCommandNameValid_(const char* cmd, size_t capacity)
+{
+    if (!cmd || cmd[0] == '\0' || capacity < 2U) return false;
+    const size_t len = strlen(cmd);
+    if (len >= capacity) return false;
+    for (size_t i = 0U; i < len; ++i) {
+        const char c = cmd[i];
+        const bool allowed =
+            (c >= 'a' && c <= 'z') ||
+            (c >= 'A' && c <= 'Z') ||
+            (c >= '0' && c <= '9') ||
+            c == '.' || c == '_' || c == '-';
+        if (!allowed) return false;
+    }
+    return true;
+}
+}  // namespace
+
+bool MQTTModule::admitInbound_(const char* topic, uint32_t nowMs, bool& reportRejection)
+{
+    reportRejection = false;
+
+    if (inboundBlockedUntilMs_ != 0U &&
+        (int32_t)(inboundBlockedUntilMs_ - nowMs) > 0) {
+        ++inboundRateLimitedCount_;
+        if (inboundLastRejectReportMs_ == 0U ||
+            (uint32_t)(nowMs - inboundLastRejectReportMs_) >=
+                Limits::Mqtt::Security::InboundRejectReportMs) {
+            inboundLastRejectReportMs_ = nowMs;
+            reportRejection = true;
+            LOGW("mqtt inbound rate limited topic=%s remaining_ms=%lu rejected=%lu",
+                 topic ? topic : "<null>",
+                 (unsigned long)(inboundBlockedUntilMs_ - nowMs),
+                 (unsigned long)inboundRateLimitedCount_);
+        }
+        return false;
+    }
+
+    if (inboundBlockedUntilMs_ != 0U) {
+        inboundBlockedUntilMs_ = 0U;
+        inboundWindowStartMs_ = nowMs;
+        inboundAcceptedInWindow_ = 0U;
+    }
+
+    if (inboundWindowStartMs_ == 0U ||
+        (uint32_t)(nowMs - inboundWindowStartMs_) >=
+            Limits::Mqtt::Security::InboundWindowMs) {
+        inboundWindowStartMs_ = nowMs;
+        inboundAcceptedInWindow_ = 0U;
+    }
+
+    if (inboundAcceptedInWindow_ >=
+        Limits::Mqtt::Security::InboundMaxPerWindow) {
+        inboundBlockedUntilMs_ =
+            nowMs + Limits::Mqtt::Security::InboundBlockMs;
+        inboundLastRejectReportMs_ = nowMs;
+        ++inboundRateLimitedCount_;
+        reportRejection = true;
+        LOGW("mqtt inbound burst blocked topic=%s accepted=%u window_ms=%lu block_ms=%lu",
+             topic ? topic : "<null>",
+             (unsigned)inboundAcceptedInWindow_,
+             (unsigned long)Limits::Mqtt::Security::InboundWindowMs,
+             (unsigned long)Limits::Mqtt::Security::InboundBlockMs);
+        return false;
+    }
+
+    ++inboundAcceptedInWindow_;
+    return true;
+}
+
 void MQTTModule::processRx_(const RxMsg& msg)
 {
+    const char* inboundKind =
+        strcmp(msg.topic, topicCmd_) == 0
+            ? "cmd"
+            : (strcmp(msg.topic, topicCfgSet_) == 0 ? "cfg/set" : "handler");
+    bool reportRateLimit = false;
+    if (!admitInbound_(inboundKind, millis(), reportRateLimit)) {
+        countRxDrop_();
+        if (reportRateLimit) {
+            const char* ackSuffix =
+                strcmp(msg.topic, topicCfgSet_) == 0
+                    ? MqttTopics::SuffixCfgAck
+                    : MqttTopics::SuffixAck;
+            publishRxError_(ackSuffix, ErrorCode::RateLimited, "mqtt.rx", false);
+        }
+        return;
+    }
+
     if (strcmp(msg.topic, topicCmd_) == 0) {
         processRxCmd_(msg);
         return;
@@ -42,6 +146,7 @@ void MQTTModule::processRx_(const RxMsg& msg)
         if (strcmp(msg.topic, topic) != 0) continue;
 
         const MqttInboundMessage inbound{msg.topic, msg.payload};
+        LOGI("mqtt inbound handler accepted");
         h->onMessage(h->ctx, inbound);
         return;
     }
@@ -92,10 +197,19 @@ void MQTTModule::processRxCmd_(const RxMsg& msg)
     }
 
     char cmd[Limits::Mqtt::Buffers::CmdName] = {0};
-    size_t cmdLen = strlen(cmdVal);
-    if (cmdLen >= sizeof(cmd)) cmdLen = sizeof(cmd) - 1U;
+    if (!mqttCommandNameValid_(cmdVal, sizeof(cmd))) {
+        publishRxError_(MqttTopics::SuffixAck, ErrorCode::BadCmdJson, "cmd.name", true);
+        return;
+    }
+    const size_t cmdLen = strlen(cmdVal);
     memcpy(cmd, cmdVal, cmdLen);
     cmd[cmdLen] = '\0';
+
+    if (mqttCommandDeniedByPolicy_(cmd)) {
+        LOGW("mqtt command denied by policy cmd=%s", cmd);
+        publishRxError_(MqttTopics::SuffixAck, ErrorCode::PolicyDenied, "mqtt.policy", false);
+        return;
+    }
 
     const char* argsJson = nullptr;
     char argsBuf[Limits::Mqtt::Buffers::CmdArgs] = {0};
@@ -109,6 +223,7 @@ void MQTTModule::processRxCmd_(const RxMsg& msg)
         argsJson = argsBuf;
     }
 
+    LOGI("mqtt command accepted cmd=%s", cmd);
     const bool ok = cmdSvc_->execute(
         cmdSvc_->ctx, cmd, msg.payload, argsJson, scratch_->reply, sizeof(scratch_->reply)
     );
@@ -168,6 +283,7 @@ void MQTTModule::processRxCfgSet_(const RxMsg& msg)
         cfgPeakSource = kv.key().c_str();
         break;
     }
+    LOGI("mqtt cfg/set accepted");
     BufferUsageTracker::note(TrackedBufferId::MqttCfgDoc,
                              cfgDoc.memoryUsage(),
                              sizeof(cfgDoc),
@@ -197,6 +313,9 @@ void MQTTModule::publishRxError_(const char* ackTopicSuffix, ErrorCode code, con
     if (parseFailure) ++parseFailCount_;
     else ++handlerFailCount_;
 
+    LOGW("mqtt inbound rejected code=%s where=%s",
+         errorCodeStr(code),
+         (where && where[0] != '\0') ? where : "unknown");
     syncRxMetrics_();
 
     if (!writeErrorJson(scratch_->payload, sizeof(scratch_->payload), code, where)) {
