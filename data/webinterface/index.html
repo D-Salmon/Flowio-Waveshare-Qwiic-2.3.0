@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Symbols+Rounded&display=swap" />
+  <title>Flow.io</title>
+  <style>
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: #0B1F3A;
+      color: #FFFFFF;
+      font-family: "Inter", "Segoe UI", Roboto, Arial, sans-serif;
+    }
+    #app-root {
+      min-height: 100vh;
+    }
+    #app-root.is-booting {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      box-sizing: border-box;
+    }
+    .boot-status {
+      font-size: 14px;
+      color: rgba(255,255,255,0.82);
+    }
+    .boot-status.error {
+      color: #FFD5DB;
+    }
+  </style>
+</head>
+<body>
+  <div id="app-root" class="is-booting"><div id="bootStatus" class="boot-status">Chargement de l'interface...</div></div>
+  <script src="/webinterface/app-core.js"></script>
+  <script>
+    (function () {
+      if (window.FlowWebCore && typeof window.FlowWebCore.bootstrap === 'function') {
+        window.FlowWebCore.bootstrap();
+      }
+    })();
+  </script>
+</body>
+</html>

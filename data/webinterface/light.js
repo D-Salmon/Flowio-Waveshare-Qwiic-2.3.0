@@ -1,0 +1,184 @@
+const $ = (id) => document.getElementById(id);
+
+const ui = {
+  product: "Flow.io",
+  rebootAfterWifi: false,
+  csrfToken: ""
+};
+
+function status(text) {
+  $("status").textContent = text;
+}
+
+async function json(url, options) {
+  const secured = Object.assign({}, options || {});
+  const method = String(secured.method || "GET").toUpperCase();
+  if (method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE") {
+    const headers = new Headers(secured.headers || {});
+    if (ui.csrfToken) headers.set("X-Flow-CSRF", ui.csrfToken);
+    secured.headers = headers;
+  }
+  const res = await fetch(url, secured);
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data || data.ok === false) throw new Error(url);
+  const token = typeof data.csrf_token === "string" ? data.csrf_token.trim() : "";
+  if (/^[0-9a-f]{32}$/i.test(token)) ui.csrfToken = token;
+  return data;
+}
+
+function form(values) {
+  return new URLSearchParams(values);
+}
+
+function applyBrand(meta) {
+  const profile = String((meta && (meta.profile || meta.profile_name)) || "").toLowerCase();
+  const name = profile === "micronova" ? "Pellet" : "Flow";
+  const suffix = document.querySelector(".brand-io");
+  $("brandName").textContent = name;
+  if (suffix) suffix.textContent = ".io";
+  $("brand").setAttribute("aria-label", name + ".io");
+  document.title = name + ".io";
+}
+
+function applyCapabilities(meta) {
+  ui.product = String((meta && meta.product_name) || ui.product);
+  ui.rebootAfterWifi = !!(meta && meta.reboot_after_wifi_save);
+}
+
+let scanTimer = 0;
+
+function scanStatus(text) {
+  $("wifiScanStatus").textContent = text;
+}
+
+function renderWifiScan(data) {
+  const nets = data && Array.isArray(data.networks) ? data.networks : [];
+  const list = $("wifiSsidList");
+  const current = ($("wifiSsid").value || "").trim();
+  list.innerHTML = "";
+  const manual = document.createElement("option");
+  manual.value = "";
+  manual.textContent = "Saisie manuelle";
+  list.appendChild(manual);
+  for (const net of nets) {
+    if (!net || !net.ssid || net.hidden) continue;
+    const opt = document.createElement("option");
+    const secure = net.secure ? " (securise)" : " (ouvert)";
+    const rssi = Number.isFinite(net.rssi) ? " " + net.rssi + " dBm" : "";
+    opt.value = net.ssid;
+    opt.textContent = (net.ssid + secure + rssi).slice(0, 72);
+    list.appendChild(opt);
+  }
+  if (current) {
+    for (const opt of list.options) {
+      if (opt.value === current) {
+        list.value = current;
+        break;
+      }
+    }
+  }
+}
+
+function updateScanStatus(data) {
+  if (!data || data.ok !== true) {
+    scanStatus("Scan Wi-Fi indisponible.");
+    return;
+  }
+  const running = !!data.running || !!data.requested;
+  const count = Number.isFinite(data.count) ? data.count : 0;
+  const total = Number.isFinite(data.total_found) ? data.total_found : count;
+  if (running) {
+    scanStatus("Scan Wi-Fi en cours...");
+    return;
+  }
+  scanStatus(count > 0
+    ? "Scan Wi-Fi terminé : " + count + " réseaux affichés (" + total + " détectés)."
+    : "Aucun réseau visible détecté.");
+}
+
+async function refreshWifiScan(trigger) {
+  clearTimeout(scanTimer);
+  try {
+    if (trigger) {
+      await json("/api/wifi/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: form({ force: "1" })
+      });
+      scanStatus("Scan Wi-Fi lancé...");
+    }
+
+    let data = null;
+    let lastErr = null;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      try {
+        data = await json("/api/wifi/scan", { cache: "no-store" });
+        renderWifiScan(data);
+        updateScanStatus(data);
+        if (!data.running && !data.requested) break;
+      } catch (err) {
+        lastErr = err;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 450));
+    }
+
+    if (!data && lastErr) {
+      throw lastErr;
+    }
+    if (data && (data.running || data.requested)) {
+      scanTimer = setTimeout(() => refreshWifiScan(false), 1200);
+    }
+  } catch (err) {
+    scanStatus("Erreur scan Wi-Fi: " + err.message);
+  }
+}
+
+async function loadAll() {
+  try {
+    const meta = await json("/api/web/meta");
+    applyBrand(meta);
+    applyCapabilities(meta);
+    $("subtitle").textContent = "Configuration Initiale - " + (meta.firmware_version || "Flow.io");
+  } catch (err) {
+    status("Meta indisponible");
+  }
+
+  try {
+    const wifi = await json("/api/wifi/config");
+    $("wifiEnabled").checked = !!wifi.enabled;
+    $("wifiSsid").value = wifi.ssid || "";
+    $("wifiPass").value = wifi.pass || "";
+    status("Pret");
+  } catch (err) {
+    status("Erreur Wi-Fi: " + err.message);
+  }
+}
+
+async function saveWifi() {
+  try {
+    const data = await json("/api/wifi/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: form({
+        enabled: $("wifiEnabled").checked ? "1" : "0",
+        ssid: $("wifiSsid").value,
+        pass: $("wifiPass").value
+      })
+    });
+    status((ui.rebootAfterWifi || data.reboot_scheduled)
+      ? "Wi-Fi enregistre. Redemarrage en cours..."
+      : "Wi-Fi enregistre. Redemarrage immediat...");
+    await json("/api/system/reboot", { method: "POST" });
+  } catch (err) {
+    status("Erreur Wi-Fi: " + err.message);
+  }
+}
+
+$("wifiScanBtn").addEventListener("click", () => refreshWifiScan(true));
+$("wifiSsidList").addEventListener("change", () => {
+  const value = $("wifiSsidList").value;
+  if (value) $("wifiSsid").value = value;
+});
+$("wifiSave").addEventListener("click", () => saveWifi());
+
+loadAll();

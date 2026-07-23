@@ -1,0 +1,1 @@
+{"ok":true,"module":"io","docs":{"io/enabled":{"type":"Bool","label_t":"cfgdocs.io.enabled.label","help_t":"cfgdocs.io.enabled.help","label":"Module IO actif","label_i18n":"cfgdocs.io.enabled.label","help":"Active ou désactive la couche IO (entrées/sorties).","help_i18n":"cfgdocs.io.enabled.help"}},"meta":{}}

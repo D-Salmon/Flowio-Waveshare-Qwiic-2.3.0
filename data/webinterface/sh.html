@@ -1,0 +1,585 @@
+  <div id="overlay" class="overlay"></div>
+  <div class="app">
+    <aside id="drawer" class="drawer collapsed">
+      <div class="drawer-header">
+        <button id="menuToggle" class="menu-btn" data-menu-toggle aria-label="Toggle menu">
+          <span class="menu-btn-glyph" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </span>
+          <span class="ui-msr menu-btn-msr" aria-hidden="true">menu</span>
+        </button>
+        <div class="drawer-user" aria-label="Flow.io">
+          <span class="brand-wordmark" aria-hidden="true">
+            <span class="brand-flow">Flow</span><span class="brand-io">.io</span>
+          </span>
+        </div>
+      </div>
+      <nav class="menu-group">
+        <button class="menu-item active" data-page="page-pool-measures"><span class="ico icon-measures" aria-hidden="true"></span><span class="label" data-i18n="menu.dashboard">Tableau de bord</span></button>
+        <button class="menu-item" data-page="page-calibration"><span class="ico icon-calibration" aria-hidden="true"></span><span class="label" data-i18n="menu.calibration">Étalonnage</span></button>
+        <button class="menu-item" data-page="page-terminal"><span class="ico icon-terminal" aria-hidden="true"></span><span class="label" data-i18n="menu.terminal">Journal d’activité</span></button>
+        <button class="menu-item" data-page="page-system"><span class="ico icon-system" aria-hidden="true"></span><span class="label" data-i18n="menu.updates">Mises à Jour</span></button>
+        <button class="menu-item" data-page="page-diagnostics"><span class="ico icon-system" aria-hidden="true"></span><span class="label">Diagnostics</span></button>
+        <button class="menu-item" data-page="page-control"><span class="ico icon-flowcfg" aria-hidden="true"></span><span class="label" data-i18n="menu.config">Configuration</span></button>
+        <button class="menu-item" data-page="page-info"><span class="ico icon-info" aria-hidden="true"></span><span class="label" data-i18n="menu.info">Informations</span></button>
+      </nav>
+    </aside>
+
+    <main class="content">
+      <div class="mobile-topbar">
+        <button class="menu-btn" data-menu-toggle aria-label="Open menu">
+          <span class="menu-btn-glyph" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </span>
+          <span class="ui-msr menu-btn-msr" aria-hidden="true">menu</span>
+        </button>
+        <div class="mobile-title" aria-label="Flow.io">
+          <span id="mobileTopbarTitle" class="mobile-page-title" data-i18n="menu.dashboard">Tableau de bord</span>
+        </div>
+      </div>
+      <section id="page-pool-measures" class="page active">
+        <div class="topbar">
+          <h1 class="ui-heading-inline"><span class="ui-msr" aria-hidden="true">water_damage</span><span data-i18n="menu.dashboard">Tableau de bord</span></h1>
+          <div class="topbar-actions">
+            <span id="poolMeasuresStatus" class="status-chip measure-status-badge" data-i18n="status.waiting">en attente...</span>
+            <button id="poolMeasuresRefresh" class="btn-tonal btn-icon-only btn-refresh-icon" aria-label="Rafraîchir les mesures actives" title="Rafraîchir les mesures actives" data-i18n-aria-label="dashboard.refresh" data-i18n-title="dashboard.refresh"><span class="refresh-icon-glyph" aria-hidden="true"></span></button>
+          </div>
+        </div>
+        <div class="control-shell">
+          <div class="control-section-title ui-heading-inline"><span class="ui-msr ui-msr-sm" aria-hidden="true">category</span><span data-i18n="dashboard.domains">Domaines</span></div>
+          <div id="poolMeasuresDomains" class="control-sections measure-domain-chips" aria-label="Domaines de mesures" data-i18n-aria-label="dashboard.domains.aria"></div>
+          <div class="control-divider measure-domain-divider"></div>
+          <div class="control-section-title ui-heading-inline"><span class="ui-msr ui-msr-sm" aria-hidden="true">monitoring</span><span data-i18n="dashboard.measures">Mesures</span></div>
+          <div class="measure-results-shell">
+            <div id="poolMeasuresGrid" class="status-grid measure-status-grid"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="page-terminal" class="page">
+        <div class="topbar">
+          <h1 class="ui-heading-inline"><span class="ui-msr" aria-hidden="true">list_alt</span><span data-i18n="menu.terminal">Journal d’activité</span></h1>
+          <div class="topbar-actions">
+            <select id="logSourceSelect" class="log-source-select" aria-label="Source des journaux" title="Source des journaux affichés">
+              <option value="supervisor">Supervisor (local)</option>
+              <option value="flowio">Flow.io (wserial)</option>
+            </select>
+            <span id="wsStatus" class="status-chip" data-i18n="terminal.inactive">inactif</span>
+            <label class="autoscroll-chip" for="toggleAutoscroll" title="Défilement automatique des journaux">
+              <span class="autoscroll-label">Scroll</span>
+              <span class="md3-switch md3-switch-compact">
+                <input id="toggleAutoscroll" type="checkbox" checked aria-label="Activer le défilement automatique des journaux" />
+                <span class="md3-track"></span>
+                <span class="md3-thumb"></span>
+              </span>
+            </label>
+          </div>
+        </div>
+        <div class="card">
+          <div id="term" class="terminal"></div>
+        </div>
+      </section>
+
+      <section id="page-system" class="page">
+        <div class="topbar">
+          <h1 class="ui-heading-inline"><span class="ui-msr" aria-hidden="true">cloud_upload</span><span data-i18n="menu.updates">Mises à Jour</span></h1>
+          <div class="topbar-actions">
+            <span id="systemStatusText" class="status-chip system-status-badge" data-i18n="status.ready">Prêt</span>
+          </div>
+        </div>
+        <div class="system-groups">
+          <div class="card system-card system-card-local-update">
+            <div class="config-section">
+              <div class="config-section-head">
+                <h2 class="ui-heading-inline"><span class="ui-msr ui-msr-sm" aria-hidden="true">install_desktop</span><span>Mise a jour locale</span></h2>
+              </div>
+              <div class="local-update-list">
+                <div class="local-update-row">
+                  <div class="field">
+                    <label for="localFirmwareFile">Firmware Waveshare</label>
+                    <input id="localFirmwareFile" type="file" accept=".bin,application/octet-stream" />
+                    <label for="localFirmwareSignature">Signature (.sig)</label>
+                    <input id="localFirmwareSignature" type="file" accept=".sig,text/plain" />
+                  </div>
+                  <button id="localFirmwareInstall" type="button" class="btn-primary"><span class="ui-msr btn-msr" aria-hidden="true">system_update_alt</span><span>Installer</span></button>
+                </div>
+                <div class="local-update-row">
+                  <div class="field">
+                    <label for="localSpiffsFile">Interface web (SPIFFS)</label>
+                    <input id="localSpiffsFile" type="file" accept=".bin,application/octet-stream" />
+                    <label for="localSpiffsSignature">Signature (.sig)</label>
+                    <input id="localSpiffsSignature" type="file" accept=".sig,text/plain" />
+                  </div>
+                  <button id="localSpiffsInstall" type="button" class="btn-tonal"><span class="ui-msr btn-msr" aria-hidden="true">web</span><span>Installer</span></button>
+                </div>
+              </div>
+              <div id="localUpdateStatus" class="config-status">Selectionnez un fichier .bin.</div>
+              <div id="localUpdateProgress" class="flow-cfg-backup-progress" hidden>
+                <div class="ug-header flow-cfg-backup-progress-head">
+                  <span class="ug-label">Televersement</span>
+                  <span id="localUpdatePct" class="ug-pct">0%</span>
+                </div>
+                <div class="bar-shell">
+                  <div id="localUpdateProgressBar" class="bar-fill" style="width:0%">
+                    <div class="bar-shimmer"></div>
+                    <div id="localUpdateProgressDot" class="bar-dot"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card system-card system-card-backup">
+            <div class="config-section">
+              <div class="config-section-head">
+                <h2 class="ui-heading-inline"><span class="ui-msr ui-msr-sm" aria-hidden="true">settings_backup_restore</span><span>Sauvegarde et restauration</span></h2>
+              </div>
+              <p class="system-card-note">Exporte ou restaure la configuration complete au format JSON. Les secrets ne sont pas inclus.</p>
+              <div class="btn-row system-backup-actions">
+                <button id="systemBackupExport" type="button" class="btn-primary"><span class="ui-msr btn-msr" aria-hidden="true">download</span><span>Sauvegarder</span></button>
+                <button id="systemBackupImport" type="button" class="btn-tonal"><span class="ui-msr btn-msr" aria-hidden="true">upload</span><span>Restaurer</span></button>
+                <input id="systemBackupImportFile" type="file" accept=".json,application/json" hidden />
+              </div>
+              <div id="systemBackupStatus" class="config-status">Sauvegarde configuration prete.</div>
+              <div id="systemBackupProgress" class="flow-cfg-backup-progress" hidden>
+                <div class="ug-header flow-cfg-backup-progress-head">
+                  <span class="ug-label">Configuration</span>
+                  <span id="systemBackupPct" class="ug-pct">0%</span>
+                </div>
+                <div class="bar-shell">
+                  <div id="systemBackupProgressBar" class="bar-fill" style="width:0%">
+                    <div class="bar-shimmer"></div>
+                    <div id="systemBackupProgressDot" class="bar-dot"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="card system-card system-card-firmware">
+            <div class="config-section">
+              <div class="form-grid upgrade-form-grid">
+                <div class="upgrade-config-row full">
+                  <div class="field">
+                    <label for="updateServerPath" data-i18n="updates.server">Serveur d’upgrade (serveur/chemin)</label>
+                    <div class="field-inline-entry upgrade-server-field">
+                      <span class="upgrade-input-prefix">http://</span>
+                      <input id="updateServerPath" placeholder="192.168.1.25:8080/api/upgrades" />
+                      <button id="applyUpdateServerPath" type="button" class="control-field-apply" aria-label="Appliquer l’URL du serveur d’upgrade" title="Aucun changement a appliquer">✓</button>
+                    </div>
+                  </div>
+                  <div class="upgrade-check-row">
+                    <button id="checkUpdates" type="button" class="btn-tonal"><span class="ui-msr btn-msr" aria-hidden="true">search</span><span data-i18n="updates.check">Rechercher les mises à jour</span></button>
+                  </div>
+                </div>
+                <div id="upgradeCards" class="upgrade-cards full" aria-live="polite">
+                  <div class="upgrade-empty" data-i18n="updates.empty">Cliquez sur « Rechercher les mises à jour ».</div>
+                </div>
+              </div>
+              <div class="btn-row upgrade-secondary-actions">
+              </div>
+            </div>
+          </div>
+
+          <div class="card system-card system-card-actions">
+            <div class="config-section">
+              <div class="system-actions system-actions-redesign">
+                <div class="upgrade-journey" aria-label="Statut de l’upgrade">
+                  <div class="ug-header">
+                    <span id="upgradeJourneyLabel" class="ug-label" data-i18n="updates.progress">Statut de l’upgrade</span>
+                  </div>
+                  <div id="upgradeSteps" class="steps"></div>
+                </div>
+                <div class="system-action reboot-selector-card">
+                  <h3 class="ui-heading-inline"><span class="ui-msr ui-msr-sm" aria-hidden="true">restart_alt</span><span data-i18n="updates.reboot.title">Redémarrage des devices</span></h3>
+                  <div class="field">
+                    <label for="rebootDeviceTarget" data-i18n="updates.reboot.select">Sélectionner un device</label>
+                    <select id="rebootDeviceTarget">
+                      <option value="supervisor">Supervisor</option>
+                      <option value="flow_soft">Flow.io soft</option>
+                      <option value="flow_hard">Flow.io hard</option>
+                      <option value="nextion">Nextion</option>
+                      <option value="factory_reset">Init Usine</option>
+                    </select>
+                  </div>
+                  <div class="btn-row system-action-actions">
+                    <button id="rebootDeviceAction" class="btn-tonal system-reboot-btn"><span class="ui-msr btn-msr" aria-hidden="true">restart_alt</span><span data-i18n="updates.reboot.action">Redémarrer</span></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="page-wifi" class="page">
+        <div class="topbar">
+          <h1 class="ui-heading-inline"><span class="ui-msr" aria-hidden="true">wifi</span><span data-i18n="wifi.title">Configuration WiFi</span></h1>
+        </div>
+        <div class="card">
+          <div class="config-section">
+            <div class="config-section-head wifi-section-head">
+              <h2 class="ui-heading-inline"><span class="ui-msr ui-msr-sm" aria-hidden="true">router</span><span data-i18n="wifi.section">WiFi</span></h2>
+              <div class="wifi-section-toggle">
+                <span data-i18n="wifi.enable">Activer</span>
+                <label class="md3-switch">
+                  <input id="wifiEnabled" type="checkbox" checked />
+                  <span class="md3-track"></span>
+                  <span class="md3-thumb"></span>
+                </label>
+              </div>
+            </div>
+            <div class="form-grid">
+              <div class="field">
+                <label for="wifiSsid">SSID</label>
+                <input id="wifiSsid" placeholder="Nom du réseau WiFi" data-i18n-placeholder="wifi.ssid.placeholder" />
+              </div>
+              <div class="field">
+                <label for="wifiSsidList">Réseaux détectés</label>
+                <div class="field-inline-select-action">
+                  <select id="wifiSsidList">
+                    <option value="" data-i18n="wifi.scan.required">Scan requis...</option>
+                  </select>
+                  <button id="scanWifi" class="btn-tonal btn-icon-only btn-refresh-icon field-inline-refresh" aria-label="Scanner les réseaux" title="Scanner les réseaux"><span class="refresh-icon-glyph" aria-hidden="true"></span></button>
+                </div>
+              </div>
+              <div class="field full">
+                <label for="wifiPass">Mot de passe</label>
+                <div class="password-wrap">
+                  <input id="wifiPass" type="password" placeholder="Mot de passe WiFi" data-i18n-placeholder="wifi.password.placeholder" />
+                  <button id="toggleWifiPass" class="password-toggle" type="button" aria-label="Afficher le mot de passe WiFi" aria-pressed="false">Voir</button>
+                </div>
+              </div>
+            </div>
+            <div class="btn-row">
+              <button id="applyWifiCfg" class="btn-primary"><span class="ui-msr btn-msr" aria-hidden="true">wifi_protected_setup</span><span data-i18n="wifi.apply">Appliquer WiFi</span></button>
+            </div>
+            <div id="wifiConfigStatus" class="config-status" data-i18n="wifi.ready">Configuration WiFi prête.</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="page-calibration" class="page">
+        <div class="topbar">
+          <h1 class="ui-heading-inline"><span class="ui-msr" aria-hidden="true">science</span><span data-i18n="menu.calibration">Étalonnage</span></h1>
+          <div class="topbar-actions">
+            <span id="calibrationStatusChip" class="status-chip" data-i18n="status.ready">Prêt</span>
+          </div>
+        </div>
+        <div class="card calibration-card">
+          <div class="control-shell calibration-shell">
+            <section class="cfg-pane calibration-pane">
+              <div class="control-section-title ui-heading-inline"><span class="ui-msr ui-msr-sm" aria-hidden="true">auto_fix_high</span><span data-i18n="calibration.assistant">Assistant</span></div>
+              <p class="calibration-intro" data-i18n="calibration.intro">Étalonnez les sondes piscine via C0/C1 (valeur = C0 * input + C1).</p>
+
+              <div class="calibration-grid">
+                <div class="field">
+                  <label for="calibrationSensorSelect" data-i18n="calibration.sensorLabel">Sonde</label>
+                  <select id="calibrationSensorSelect">
+                    <option value="ph_one">pH (1 point - offset)</option>
+                    <option value="ph" data-i18n="calibration.sensor.ph">pH (2 points)</option>
+                    <option value="ph_three">pH (3 points)</option>
+                    <option value="orp" data-i18n="calibration.sensor.orp">ORP (2 points)</option>
+                    <option value="orp_one" data-i18n="calibration.sensor.orpOne">ORP (1 point - offset)</option>
+                    <option value="psi" data-i18n="calibration.sensor.psi">Pression bar (2 points)</option>
+                    <option value="water_temp" data-i18n="calibration.sensor.waterTemp">Température eau (1 point)</option>
+                    <option value="air_temp" data-i18n="calibration.sensor.airTemp">Température air (1 point)</option>
+                  </select>
+                </div>
+                <div class="field calibration-actions-field">
+                  <label>&nbsp;</label>
+                  <div class="btn-row calibration-actions-row">
+                    <button id="calibrationLoadBtn" class="btn-tonal" data-i18n="calibration.loadSensor">Charger la sonde</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="calibration-summary-grid">
+                <div class="calibration-summary-card">
+                  <span class="calibration-summary-label" data-i18n="calibration.summary.ioModule">Module IO</span>
+                  <span id="calibrationIoModule" class="calibration-summary-value">-</span>
+                </div>
+                <div class="calibration-summary-card">
+                  <span class="calibration-summary-label" data-i18n="calibration.summary.c0Current">C0 actuel</span>
+                  <span id="calibrationC0Current" class="calibration-summary-value">-</span>
+                </div>
+                <div class="calibration-summary-card">
+                  <span class="calibration-summary-label" data-i18n="calibration.summary.c1Current">C1 actuel</span>
+                  <span id="calibrationC1Current" class="calibration-summary-value">-</span>
+                </div>
+              </div>
+
+              <div id="calibrationModeHint" class="config-status config-status-muted" data-i18n="calibration.mode.two.hint">Mode 2 points actif: recalcul de C0 et C1.</div>
+
+              <div id="calibrationTwoPointFields" class="calibration-fields-shell">
+                <div class="calibration-fields-title" data-i18n="calibration.mode.two.title">Étalonnage 2 points</div>
+                <div class="calibration-grid calibration-grid-points">
+                  <div class="field">
+                    <label for="calibrationPoint1Measured" data-i18n="calibration.point1.measured">Point 1 - Mesure affichée</label>
+                    <div class="calibration-measured-input-row">
+                      <input id="calibrationPoint1Measured" inputmode="decimal" placeholder="ex: 7.42" />
+                      <button id="calibrationPoint1LiveBtn" type="button" class="btn-tonal btn-icon-only btn-refresh-icon calibration-live-fill-btn" aria-label="Reporter la mesure live sur Point 1" title="Reporter la mesure live" data-i18n-aria-label="calibration.liveToPoint1" data-i18n-title="calibration.liveToPoint1"><span class="refresh-icon-glyph" aria-hidden="true"></span></button>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <label for="calibrationPoint1Reference" data-i18n="calibration.point1.reference">Point 1 - Référence connue (solution tampon, manomètre, etc.)</label>
+                    <input id="calibrationPoint1Reference" inputmode="decimal" placeholder="ex: 7.00" />
+                  </div>
+                  <div class="field">
+                    <label for="calibrationPoint2Measured" data-i18n="calibration.point2.measured">Point 2 - Mesure affichée</label>
+                    <div class="calibration-measured-input-row">
+                      <input id="calibrationPoint2Measured" inputmode="decimal" placeholder="ex: 9.68" />
+                      <button id="calibrationPoint2LiveBtn" type="button" class="btn-tonal btn-icon-only btn-refresh-icon calibration-live-fill-btn" aria-label="Reporter la mesure live sur Point 2" title="Reporter la mesure live" data-i18n-aria-label="calibration.liveToPoint2" data-i18n-title="calibration.liveToPoint2"><span class="refresh-icon-glyph" aria-hidden="true"></span></button>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <label for="calibrationPoint2Reference" data-i18n="calibration.point2.reference">Point 2 - Référence connue (solution tampon, manomètre, etc.)</label>
+                    <input id="calibrationPoint2Reference" inputmode="decimal" placeholder="ex: 10.00" />
+                  </div>
+                </div>
+              </div>
+
+              <div id="calibrationOnePointFields" class="calibration-fields-shell" hidden>
+                <div class="calibration-fields-title" data-i18n="calibration.mode.one.title">Étalonnage 1 point</div>
+                <div class="calibration-grid calibration-grid-points">
+                  <div class="field">
+                    <label for="calibrationSingleMeasured" data-i18n="calibration.single.measured">Mesure affichée</label>
+                    <div class="calibration-measured-input-row">
+                      <input id="calibrationSingleMeasured" inputmode="decimal" placeholder="ex: 24.4" />
+                      <button id="calibrationSingleLiveBtn" type="button" class="btn-tonal btn-icon-only btn-refresh-icon calibration-live-fill-btn" aria-label="Reporter la mesure live" title="Reporter la mesure live" data-i18n-aria-label="calibration.liveToMeasure" data-i18n-title="calibration.liveToMeasure"><span class="refresh-icon-glyph" aria-hidden="true"></span></button>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <label for="calibrationSingleReference" data-i18n="calibration.single.reference">Référence connue (solution tampon, manomètre, etc.)</label>
+                    <input id="calibrationSingleReference" inputmode="decimal" placeholder="ex: 25.0" />
+                  </div>
+                </div>
+              </div>
+
+              <div id="calibrationThreePointFields" class="calibration-fields-shell" hidden>
+                <div class="calibration-fields-title">Troisieme point</div>
+                <div class="calibration-grid calibration-grid-points">
+                  <div class="field">
+                    <label for="calibrationPoint3Measured">Point 3 - Mesure affichee</label>
+                    <div class="calibration-measured-input-row">
+                      <input id="calibrationPoint3Measured" inputmode="decimal" placeholder="ex: 10.12" />
+                      <button id="calibrationPoint3LiveBtn" type="button" class="btn-tonal btn-icon-only btn-refresh-icon calibration-live-fill-btn" aria-label="Reporter la mesure live sur Point 3" title="Reporter la mesure live"><span class="refresh-icon-glyph" aria-hidden="true"></span></button>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <label for="calibrationPoint3Reference">Point 3 - Reference connue</label>
+                    <input id="calibrationPoint3Reference" inputmode="decimal" placeholder="ex: 10.00" />
+                  </div>
+                </div>
+              </div>
+
+              <div class="btn-row calibration-main-actions">
+                <button id="calibrationComputeBtn" class="btn-tonal"><span class="ui-msr btn-msr" aria-hidden="true">calculate</span><span data-i18n="calibration.compute">Calculer C0/C1</span></button>
+                <button id="calibrationApplyBtn" class="btn-primary" disabled><span class="ui-msr btn-msr" aria-hidden="true">done</span><span data-i18n="calibration.applyFlow">Appliquer sur Flow.io</span></button>
+              </div>
+
+              <div id="calibrationPreview" class="calibration-preview" hidden></div>
+              <div id="calibrationChecks" class="calibration-checks" hidden></div>
+              <div id="calibrationStatus" class="config-status" data-i18n="calibration.ready">Étalonnage prêt.</div>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <section id="page-control" class="page">
+        <div class="topbar">
+          <div class="control-topbar-heading">
+          <h1 id="flowCfgTitle" class="ui-heading-inline"><span class="ui-msr" aria-hidden="true">settings</span><span data-i18n="menu.config">Configuration</span></h1>
+          </div>
+          <div class="topbar-actions control-topbar-actions">
+            <button id="flowCfgRefresh" class="btn-tonal btn-icon-only btn-refresh-icon" aria-label="Rafraîchir la configuration" title="Rafraîchir la configuration" data-i18n-aria-label="config.refresh" data-i18n-title="config.refresh"><span class="refresh-icon-glyph" aria-hidden="true"></span></button>
+            <button id="flowCfgExport" class="btn-tonal btn-compact"><span class="ui-msr btn-msr" aria-hidden="true">download</span><span data-i18n="config.export">Backup Config</span></button>
+            <button id="flowCfgImport" class="btn-tonal btn-compact"><span class="ui-msr btn-msr" aria-hidden="true">upload</span><span data-i18n="config.import">Restore Config</span></button>
+            <input id="flowCfgImportFile" type="file" accept=".json,application/json" hidden />
+          </div>
+        </div>
+        <div class="card control-card">
+          <div class="control-shell control-shell-tree">
+            <div class="control-layout">
+              <aside class="cfg-pane cfg-tree-pane">
+                <div id="flowCfgTree" class="cfg-tree" role="tree" aria-label="Arbre de configuration Flow.io"></div>
+              </aside>
+              <section class="cfg-pane cfg-detail-pane">
+                <div class="control-section-title ui-heading-inline"><span class="ui-msr ui-msr-sm" aria-hidden="true">account_tree</span><span data-i18n="config.branch">Branche</span></div>
+                <div class="control-detail-header">
+                  <div class="control-current-path-wrap">
+                    <div id="flowCfgCurrentPath" class="control-current-path" data-i18n="config.root">Racine</div>
+                    <div id="flowCfgPathMeta" class="control-current-caption" data-i18n="config.selectBranch">Sélectionnez une branche dans l'arborescence.</div>
+                  </div>
+                </div>
+                <div class="control-divider"></div>
+                <div class="control-section-title ui-heading-inline"><span class="ui-msr ui-msr-sm" aria-hidden="true">tune</span><span data-i18n="config.variables">Variables</span></div>
+                <div id="flowCfgFields" class="control-fields"></div>
+                <div id="flowCfgStatus" class="config-status" data-i18n="config.remoteReady">Configuration distante prête.</div>
+                <div id="flowCfgBackupStatus" class="config-status">Sauvegarde configuration prete.</div>
+                <div id="flowCfgBackupProgress" class="flow-cfg-backup-progress" hidden>
+                  <div class="ug-header flow-cfg-backup-progress-head">
+                    <span class="ug-label" data-i18n="config.exportProgress">Export ConfigStore</span>
+                    <span id="flowCfgBackupPct" class="ug-pct">0%</span>
+                  </div>
+                  <div class="bar-shell">
+                    <div id="flowCfgBackupProgressBar" class="bar-fill" style="width:0%">
+                      <div class="bar-shimmer"></div>
+                      <div id="flowCfgBackupProgressDot" class="bar-dot"></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="control-actions">
+                  <button id="flowCfgApply" class="btn-primary"><span class="ui-msr btn-msr" aria-hidden="true">done_all</span><span data-i18n="config.apply">Appliquer</span></button>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="page-diagnostics" class="page">
+        <div class="topbar">
+          <h1 class="ui-heading-inline"><span class="ui-msr" aria-hidden="true">fact_check</span><span>Diagnostics</span></h1>
+          <div class="topbar-actions">
+            <span id="diagStatusChip" class="status-chip" data-i18n="status.ready">Pret</span>
+          </div>
+        </div>
+        <div class="card">
+          <div class="config-section">
+            <div class="config-section-head">
+              <div>
+                <div class="control-section-title ui-heading-inline"><span class="ui-msr ui-msr-sm" aria-hidden="true">checklist</span><span>Mise en service</span></div>
+                <p class="calibration-intro">Synthese rapide des controles a faire avant fonctionnement automatique.</p>
+              </div>
+              <button id="diagRefreshBtn" class="btn-tonal" type="button"><span class="ui-msr btn-msr" aria-hidden="true">refresh</span><span>Actualiser</span></button>
+            </div>
+            <div id="diagCommissionGrid" class="status-grid"></div>
+            <div id="diagNetworkGrid" class="status-grid"></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="config-section">
+            <div class="config-section-head">
+              <div>
+                <div class="control-section-title ui-heading-inline"><span class="ui-msr ui-msr-sm" aria-hidden="true">hub</span><span>Scan I2C Qwiic</span></div>
+                <p class="calibration-intro">Controle rapide des modules attendus sur le bus Qwiic Waveshare. SDA GPIO42, SCL GPIO41.</p>
+              </div>
+              <button id="diagI2cScanBtn" class="btn-primary" type="button"><span class="ui-msr btn-msr" aria-hidden="true">search</span><span>Scanner</span></button>
+            </div>
+            <div id="diagI2cGrid" class="status-grid"></div>
+            <div id="diagI2cStatus" class="config-status">Scan I2C pret.</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="config-section">
+            <div class="config-section-head">
+              <div>
+                <div class="control-section-title ui-heading-inline"><span class="ui-msr ui-msr-sm" aria-hidden="true">device_thermostat</span><span>Sondes DS18B20</span></div>
+                <p class="calibration-intro">Affiche les ROM IDs vues via le DS2484 pour identifier eau/air en rechauffant une sonde.</p>
+              </div>
+              <button id="diagDs18ScanBtn" class="btn-tonal" type="button"><span class="ui-msr btn-msr" aria-hidden="true">sensors</span><span>Identifier</span></button>
+            </div>
+            <div id="diagDs18Grid" class="status-grid"></div>
+            <div id="diagDs18Status" class="config-status">Identification DS18B20 prete.</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="config-section">
+            <div class="config-section-head">
+              <div>
+                <div class="control-section-title ui-heading-inline"><span class="ui-msr ui-msr-sm" aria-hidden="true">monitor_heart</span><span>Diagnostic des capteurs</span></div>
+                <p class="calibration-intro">Valeur calculee, entree brute, code ADC, adresse I2C et anciennete de chaque mesure.</p>
+              </div>
+              <button id="diagSensorsRefreshBtn" class="btn-tonal" type="button"><span class="ui-msr btn-msr" aria-hidden="true">refresh</span><span>Actualiser</span></button>
+            </div>
+            <div id="diagSensorsGrid" class="status-grid"></div>
+            <div id="diagSensorsStatus" class="config-status">Diagnostic capteurs pret.</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="config-section">
+            <div class="control-section-title ui-heading-inline"><span class="ui-msr ui-msr-sm" aria-hidden="true">speed</span><span>Configuration de la pression</span></div>
+            <p class="calibration-intro">Correspondance tension/pression du capteur ADS1115 en bars.</p>
+            <div class="form-grid">
+              <div class="field"><label for="diagPressureVMin">Tension minimale (V)</label><input id="diagPressureVMin" inputmode="decimal" value="0.4" /></div>
+              <div class="field"><label for="diagPressureBarMin">Pression minimale (bar)</label><input id="diagPressureBarMin" inputmode="decimal" value="0" /></div>
+              <div class="field"><label for="diagPressureVMax">Tension maximale (V)</label><input id="diagPressureVMax" inputmode="decimal" value="2.4" /></div>
+              <div class="field"><label for="diagPressureBarMax">Pression maximale (bar)</label><input id="diagPressureBarMax" inputmode="decimal" value="3" /></div>
+            </div>
+            <div class="btn-row"><button id="diagPressureApplyBtn" class="btn-primary" type="button"><span class="ui-msr btn-msr" aria-hidden="true">done</span><span>Appliquer en bars</span></button></div>
+            <div id="diagPressureStatus" class="config-status">Reglage actuel par defaut : 0,4-2,4 V pour 0-3 bar.</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="config-section">
+            <div class="control-section-title ui-heading-inline"><span class="ui-msr ui-msr-sm" aria-hidden="true">power_settings_new</span><span>Test relais Waveshare</span></div>
+            <p class="calibration-intro">Le bouton test active le relais 3 secondes puis le relache automatiquement cote firmware. Les relais critiques demandent confirmation.</p>
+            <div id="diagRelayGrid" class="status-grid"></div>
+            <div id="diagRelayStatus" class="config-status">Diagnostic relais pret.</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="page-info" class="page">
+        <div class="topbar">
+          <h1 class="ui-heading-inline"><span class="ui-msr" aria-hidden="true">info</span><span data-i18n="menu.info">Informations</span></h1>
+          <div class="topbar-actions">
+            <span id="infoStatusChip" class="status-chip" data-i18n="status.waiting">En attente...</span>
+          </div>
+        </div>
+        <div class="info-card-stack">
+          <div class="card info-card">
+            <div class="config-section info-panel">
+              <div class="info-card-header">Supervisor</div>
+              <div id="infoGrid" class="info-list" aria-live="polite"></div>
+            </div>
+          </div>
+          <div class="card info-card">
+            <div class="config-section info-panel">
+              <div class="info-card-head">
+              <div class="info-card-header" data-i18n="info.flowSystem">Système Flow.io</div>
+                <button id="infoSystemLoader" class="btn-tonal btn-icon-only btn-refresh-icon info-card-load-btn" aria-label="Charger le domaine Système" title="Charger le domaine Système">
+                  <span class="refresh-icon-glyph" aria-hidden="true"></span>
+                </button>
+              </div>
+              <div id="infoSystemGrid" class="info-list" aria-live="polite"></div>
+            </div>
+          </div>
+          <div class="card info-card">
+            <div class="config-section info-panel">
+              <div class="info-card-head">
+              <div class="info-card-header" data-i18n="info.flowWifi">WiFi Flow.io</div>
+                <button id="infoWifiLoader" class="btn-tonal btn-icon-only btn-refresh-icon info-card-load-btn" aria-label="Charger le domaine WiFi" title="Charger le domaine WiFi">
+                  <span class="refresh-icon-glyph" aria-hidden="true"></span>
+                </button>
+              </div>
+              <div id="infoWifiGrid" class="info-list" aria-live="polite"></div>
+            </div>
+          </div>
+          <div class="card info-card">
+            <div class="config-section info-panel">
+              <div class="info-card-head">
+              <div class="info-card-header" data-i18n="info.flowMqtt">MQTT Flow.io</div>
+                <button id="infoMqttLoader" class="btn-tonal btn-icon-only btn-refresh-icon info-card-load-btn" aria-label="Charger le domaine MQTT" title="Charger le domaine MQTT">
+                  <span class="refresh-icon-glyph" aria-hidden="true"></span>
+                </button>
+              </div>
+              <div id="infoMqttGrid" class="info-list" aria-live="polite"></div>
+            </div>
+          </div>
+          <div class="card info-card info-legal-card">
+            <div class="config-section info-panel">
+              <div class="info-card-header">license notice</div>
+              <div class="info-legal-text">
+                MIT License Copyright (c) 2026 Christophe Belmont Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:<br><br>The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.<br><br>THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>

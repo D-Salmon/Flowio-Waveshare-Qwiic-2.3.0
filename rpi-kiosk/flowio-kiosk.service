@@ -1,0 +1,26 @@
+[Unit]
+Description=Flow.io Chromium kiosk
+Wants=network-online.target
+After=network-online.target systemd-user-sessions.service
+Conflicts=getty@tty1.service
+
+[Service]
+Type=simple
+User=flowio-kiosk
+Group=flowio-kiosk
+PAMName=login
+WorkingDirectory=/var/lib/flowio-kiosk
+Environment=HOME=/var/lib/flowio-kiosk
+Environment=DISPLAY=:0
+ExecStart=/usr/bin/xinit /usr/local/lib/flowio-kiosk/session.sh -- :0 vt1 -keeptty -nocursor
+Restart=always
+RestartSec=3
+TimeoutStopSec=10
+StandardInput=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+
+[Install]
+WantedBy=graphical.target

@@ -1,0 +1,1030 @@
+#include "esp32_flasher.h"
+
+/**
+   Calculate timeout based on data size
+   @param size_bytes: Size of data in bytes
+   @param time_per_mb: Time allowance per megabyte
+   Returns: Calculated timeout value
+*/
+static uint32_t timeout_per_mb(uint32_t size_bytes, uint32_t time_per_mb) {
+  constexpr uint32_t kMb = 1000000UL;
+  uint32_t timeout = (uint32_t)(((uint64_t)time_per_mb * (uint64_t)size_bytes + (kMb - 1U)) / kMb);
+  timeout = MAX(timeout, DEFAULT_FLASH_TIMEOUT);
+  timeout += 2000U;  // safety margin for slow targets/busy bus
+  return timeout;
+}
+
+/**
+   Calculate checksum for data verification
+   @param data: Pointer to data buffer
+   @param size: Size of data
+   Returns: Calculated checksum
+*/
+static uint8_t compute_checksum(const uint8_t *data, uint32_t size) {
+  uint8_t checksum = 0xEF;  // Initial value
+  while (size--) {
+    checksum ^= *data++;
+  }
+  return checksum;
+}
+
+void ESP32Flasher::setUpdateProgressCallback(THandlerFunction value){
+	_updateProgressCallback = value;
+}
+
+/**
+   Verify and process response from ESP32
+   @param command: Expected command to verify against
+   Returns: SUCCESS or error code
+*/
+int ESP32Flasher::verifyResponse(uint8_t command) {
+  lastCommandFailCode_ = RESPONSE_OK;
+  uint8_t ch;
+  uint8_t buff[8];  // Response buffer: direction(1) + command(1) + size(2) + value(4)
+  // Searching for start delimiter
+  do {
+    // Step 1: Find start delimiter
+    do {
+      int32_t remaining = (s_time_end - millis());
+      if (remaining <= 0) {
+        remaining = 0; // Timeout approaching while waiting for delimiter
+      }
+      Serial2.setTimeout(remaining);
+
+      int read = Serial2.readBytes(&ch, 1);
+      if (read < 0) {
+        // Read operation failed
+        return ERR_FAIL;
+      } else if (read < 1) {
+        // Timeout waiting for start delimiter
+        return ERR_TIMEOUT;
+      }
+    } while (ch != DELIMITER);
+
+    // Step 2: Skip any extra delimiters
+    do {
+      int32_t remaining = (s_time_end - millis());
+      if (remaining <= 0) {
+        remaining = 0;
+      }
+      Serial2.setTimeout(remaining);
+
+      int read = Serial2.readBytes(&ch, 1);
+      if (read < 0) {
+        do { Serial.print("[ERROR] Failed reading extra delimiters"); Serial.print("\r\n"); } while (0);
+        return ERR_FAIL;
+      } else if (read < 1) {
+        do { Serial.print("[ERROR] Timeout reading extra delimiters"); Serial.print("\r\n"); } while (0);
+        return ERR_TIMEOUT;
+      }
+    } while (ch == DELIMITER);
+
+    // Store first byte (already read)
+    buff[0] = ch;
+
+    // Step 3: Read response packet
+    for (uint32_t i = 1; i < 8; i++) {
+      int32_t remaining = (s_time_end - millis());
+      if (remaining <= 0) {
+        remaining = 0;
+      }
+      Serial2.setTimeout(remaining);
+
+      int read = Serial2.readBytes(&ch, 1);
+      if (read < 0) {
+        Serial.printf("[ERROR] Failed reading byte %d of response\n", i);
+        return ERR_FAIL;
+      } else if (read < 1) {
+        Serial.printf("[ERROR] Timeout reading byte %d of response\n", i);
+        return ERR_TIMEOUT;
+      }
+
+      // Handle SLIP encoding
+      if (ch == 0xDB) {
+        remaining = (s_time_end - millis());
+        if (remaining <= 0) {
+          remaining = 0;
+        }
+        Serial2.setTimeout(remaining);
+
+        read = Serial2.readBytes(&ch, 1);
+        if (read < 0) {
+          do { Serial.print("[ERROR] Failed reading SLIP escape sequence"); Serial.print("\r\n"); } while (0);
+          return ERR_FAIL;
+        } else if (read < 1) {
+          do { Serial.print("[ERROR] Timeout reading SLIP escape sequence"); Serial.print("\r\n"); } while (0);
+          return ERR_TIMEOUT;
+        }
+
+        if (ch == 0xDC) {
+          buff[i] = 0xC0;
+        } else if (ch == 0xDD) {
+          buff[i] = 0xDB;
+        } else {
+          do { Serial.print("[ERROR] Invalid SLIP escape sequence"); Serial.print("\r\n"); } while (0);
+          return ERR_INVALID_RESP;
+        }
+      } else if (ch == DELIMITER) {
+        break;
+      } else {
+        buff[i] = ch;
+      }
+    }
+
+    // Step 4: Read status bytes
+    uint8_t status[2];  // [0] = failed flag, [1] = error code
+    for (uint32_t i = 0; i < 2; i++) {
+      int32_t remaining = (s_time_end - millis());
+      if (remaining <= 0) {
+        remaining = 0;
+      }
+      Serial2.setTimeout(remaining);
+
+      int read = Serial2.readBytes(&ch, 1);
+      if (read < 0) {
+        Serial.printf("[ERROR] Failed reading status byte %d\n", i);
+        return ERR_FAIL;
+      } else if (read < 1) {
+        Serial.printf("[ERROR] Timeout reading status byte %d\n", i);
+        return ERR_TIMEOUT;
+      }
+
+      // Handle SLIP encoding for status
+      if (ch == 0xDB) {
+        remaining = (s_time_end - millis());
+        if (remaining <= 0) {
+          remaining = 0;
+        }
+        Serial2.setTimeout(remaining);
+
+        read = Serial2.readBytes(&ch, 1);
+        if (read < 0) {
+          do { Serial.print("[ERROR] Failed reading status SLIP escape"); Serial.print("\r\n"); } while (0);
+          return ERR_FAIL;
+        } else if (read < 1) {
+          do { Serial.print("[ERROR] Timeout reading status SLIP escape"); Serial.print("\r\n"); } while (0);
+          return ERR_TIMEOUT;
+        }
+
+        if (ch == 0xDC) {
+          status[i] = 0xC0;
+        } else if (ch == 0xDD) {
+          status[i] = 0xDB;
+        } else {
+          do { Serial.print("[ERROR] Invalid status SLIP escape sequence"); Serial.print("\r\n"); } while (0);
+          return ERR_INVALID_RESP;
+        }
+      } else {
+        status[i] = ch;
+      }
+    }
+
+    // Step 5: Wait for end delimiter
+    do {
+      int32_t remaining = (s_time_end - millis());
+      if (remaining <= 0) {
+        remaining = 0;
+      }
+      Serial2.setTimeout(remaining);
+
+      int read = Serial2.readBytes(&ch, 1);
+      if (read < 0) {
+        do { Serial.print("[ERROR] Failed reading end delimiter"); Serial.print("\r\n"); } while (0);
+        return ERR_FAIL;
+      } else if (read < 1) {
+        do { Serial.print("[ERROR] Timeout waiting for end delimiter"); Serial.print("\r\n"); } while (0);
+        return ERR_TIMEOUT;
+      }
+    } while (ch != DELIMITER);
+
+    // Step 6: Verify response matches expected command
+    if (buff[0] == READ_DIRECTION && buff[1] == command) {
+      // Check status
+      if (status[0]) {  // If failed flag is set
+        lastCommandFailCode_ = status[1];
+        do { Serial.print("[ERROR] Command failed with status:"); Serial.print("\r\n"); } while (0);
+        switch (status[1]) {  // error code
+          case INVALID_CRC:
+            do { Serial.print("  INVALID_CRC: Checksum verification failed"); Serial.print("\r\n"); } while (0);
+            break;
+          case INVALID_COMMAND:
+            do { Serial.print("  INVALID_COMMAND: Command or parameters invalid"); Serial.print("\r\n"); } while (0);
+            break;
+          case COMMAND_FAILED:
+            do { Serial.print("  COMMAND_FAILED: Failed to execute command"); Serial.print("\r\n"); } while (0);
+            break;
+          case FLASH_WRITE_ERR:
+            do { Serial.print("  FLASH_WRITE_ERR: Flash write verification failed"); Serial.print("\r\n"); } while (0);
+            break;
+          case FLASH_READ_ERR:
+            do { Serial.print("  FLASH_READ_ERR: Flash read operation failed"); Serial.print("\r\n"); } while (0);
+            break;
+          case READ_LENGTH_ERR:
+            do { Serial.print("  READ_LENGTH_ERR: Read length exceeds limit"); Serial.print("\r\n"); } while (0);
+            break;
+          case DEFLATE_ERROR:
+            do { Serial.print("  DEFLATE_ERROR: Decompression error"); Serial.print("\r\n"); } while (0);
+            break;
+          default:
+            Serial.printf("  UNKNOWN ERROR: Code 0x%02X\n", status[1]);
+            break;
+        }
+        return ERR_CMD_STATUS;
+      }
+      // Command response verified successfully
+      return SUCCESS;
+    }
+    do { Serial.print("[DEBUG] Response didn't match expected command, continuing..."); Serial.print("\r\n"); } while (0);
+  } while (1);
+}
+
+void ESP32Flasher::flushUartInput_(uint32_t drainMs)
+{
+  const uint32_t start = millis();
+  while ((uint32_t)(millis() - start) < drainMs) {
+    while (Serial2.available() > 0) {
+      (void)Serial2.read();
+    }
+    delay(1);
+  }
+}
+
+int ESP32Flasher::recoverBootloaderLink_(uint32_t syncTimeoutMs)
+{
+  flushUartInput_(40U);
+  const uint32_t previousTimeout = s_time_end;
+  s_time_end = millis() + syncTimeoutMs;
+  const int syncStatus = espSyncHandle();
+  if (syncStatus != SUCCESS) {
+    s_time_end = previousTimeout;
+    return syncStatus;
+  }
+
+  s_time_end = millis() + DEFAULT_TIMEOUT;
+  const int attachStatus = spiAttachCmd(0);
+  s_time_end = previousTimeout;
+  return attachStatus;
+}
+
+/**
+   Send flash begin command to ESP32
+   @param offset: Flash offset address
+   @param erase_size: Size of region to erase
+   @param block_size: Size of each block
+   @param blocks_to_write: Number of blocks to write
+   Returns: SUCCESS or error code
+*/
+int ESP32Flasher::flashBeginCmd(uint32_t offset,
+                                uint32_t erase_size,
+                                uint32_t block_size,
+                                uint32_t blocks_to_write) {
+  do { Serial.print("[INFO] ========== Sending Flash Begin Command =========="); Serial.print("\r\n"); } while (0);
+
+  // Command packet structure (24 bytes total)
+  uint8_t cmd_data[24] = {0};
+
+  // Fill header (8 bytes)
+  cmd_data[0] = WRITE_DIRECTION;    // direction
+  cmd_data[1] = FLASH_BEGIN;        // command
+  cmd_data[2] = 0x10;               // size (16 bytes payload)
+  cmd_data[3] = 0x00;               // size high byte
+  cmd_data[4] = 0x00;               // checksum placeholder
+  cmd_data[5] = 0x00;               // checksum placeholder
+  cmd_data[6] = 0x00;               // checksum placeholder
+  cmd_data[7] = 0x00;               // checksum placeholder
+
+  // Fill payload (16 bytes)
+  memcpy(&cmd_data[8], &erase_size, 4);       // erase_size
+  memcpy(&cmd_data[12], &blocks_to_write, 4); // packet_count
+  memcpy(&cmd_data[16], &block_size, 4);      // packet_size
+  memcpy(&cmd_data[20], &offset, 4);          // offset
+
+  // Reset sequence number for new flash operation
+  s_sequence_number = 0;
+
+  //  Serial.println("[DEBUG] Flash begin parameters:");
+  //  Serial.printf("  - Offset: 0x%X\n", offset);
+  //  Serial.printf("  - Erase size: %d bytes\n", erase_size);
+  //  Serial.printf("  - Block size: %d bytes\n", block_size);
+  //  Serial.printf("  - Blocks to write: %d\n", blocks_to_write);
+
+  // Send start delimiter
+  Serial2.write(DELIMITER);
+
+  // Send command data with SLIP encoding
+  for (uint32_t i = 0; i < 24; i++) {
+    if (cmd_data[i] == 0xC0) {
+      Serial2.write((const char *)C0_REPLACEMENT, 2);
+    } else if (cmd_data[i] == 0xDB) {
+      Serial2.write((const char *)DB_REPLACEMENT, 2);
+    } else {
+      Serial2.write((const char *)&cmd_data[i], 1);
+    }
+  }
+
+  // Send end delimiter
+  Serial2.write(DELIMITER);
+
+  // Verify response
+  int response = verifyResponse(FLASH_BEGIN);
+  if (response == SUCCESS) {
+    do { Serial.print("[INFO] Flash begin command accepted"); Serial.print("\r\n"); } while (0);
+  } else {
+    Serial.printf("[ERROR] Flash begin command failed with error: %d\n", response);
+  }
+
+  do { Serial.print("================================================\n"); Serial.print("\r\n"); } while (0);
+  return response;
+}
+
+/**
+   Send flash data command with payload to ESP32
+   @param data: Pointer to data buffer
+   @param size: Size of data to flash
+   Returns: SUCCESS or error code
+*/
+int ESP32Flasher::flashDataCmd(const uint8_t *data, uint32_t size) {
+
+  // Command header (24 bytes total)
+  uint8_t cmd_data[24] = {0};
+
+  // Fill header (4 bytes)
+  cmd_data[0] = WRITE_DIRECTION;  // Direction
+  cmd_data[1] = FLASH_DATA;       // Command
+  cmd_data[2] = 0x10;             // Size low byte
+  cmd_data[3] = 0x04;             // Size high byte
+
+  // Calculate and fill checksum (4 bytes)
+  uint8_t checksum = compute_checksum(data, size);
+  cmd_data[4] = checksum;
+  cmd_data[5] = 0x00;
+  cmd_data[6] = 0x00;
+  cmd_data[7] = 0x00;
+
+  // Fill data size (4 bytes)
+  cmd_data[8] = 0x00;
+  cmd_data[9] = 0x04;
+  cmd_data[10] = 0x00;
+  cmd_data[11] = 0x00;
+
+  // Fill sequence number (4 bytes)
+  cmd_data[12] = s_sequence_number & 0xFF;
+  cmd_data[13] = (s_sequence_number >> 8) & 0xFF;
+  cmd_data[14] = 0x00;
+  cmd_data[15] = 0x00;
+
+  // Increment sequence number for next packet
+  s_sequence_number++;
+
+  // Send start delimiter
+  Serial2.write(DELIMITER);
+
+  // Send header with SLIP encoding
+  for (uint32_t i = 0; i < 24; i++) {
+    if (cmd_data[i] == 0xC0) {
+      Serial2.write((const char *)C0_REPLACEMENT, 2);
+    } else if (cmd_data[i] == 0xDB) {
+      Serial2.write((const char *)DB_REPLACEMENT, 2);
+    } else {
+      Serial2.write((const char *)&cmd_data[i], 1);
+    }
+  }
+
+  // Send data with SLIP encoding
+  for (uint32_t i = 0; i < size; i++) {
+    if (data[i] == 0xC0) {
+      Serial2.write((const char *)C0_REPLACEMENT, 2);
+    } else if (data[i] == 0xDB) {
+      Serial2.write((const char *)DB_REPLACEMENT, 2);
+    } else {
+      Serial2.write((const char *)&data[i], 1);
+    }
+  }
+
+  // Send end delimiter
+  Serial2.write(DELIMITER);
+
+  // Verify response
+  int response = verifyResponse(FLASH_DATA);
+  if (response != SUCCESS) {
+    Serial.printf("[ERROR] Flash data command failed with error: %d\n", response);
+  }
+  
+  return response;
+}
+
+/**
+   Send flash end command
+   @param stay_in_loader: true to remain in bootloader, false to reboot app
+   Returns: SUCCESS or error code
+*/
+int ESP32Flasher::flashEndCmd(bool stay_in_loader) {
+  uint8_t cmd_data[12] = {0};
+  cmd_data[0] = WRITE_DIRECTION;
+  cmd_data[1] = FLASH_END;
+  cmd_data[2] = 4;
+  cmd_data[3] = 0;
+  const uint32_t payload = stay_in_loader ? 1U : 0U;
+  memcpy(&cmd_data[8], &payload, sizeof(payload));
+
+  Serial2.write(DELIMITER);
+  for (uint32_t i = 0; i < sizeof(cmd_data); i++) {
+    if (cmd_data[i] == 0xC0) {
+      Serial2.write((const char *)C0_REPLACEMENT, 2);
+    } else if (cmd_data[i] == 0xDB) {
+      Serial2.write((const char *)DB_REPLACEMENT, 2);
+    } else {
+      Serial2.write((const char *)&cmd_data[i], 1);
+    }
+  }
+  Serial2.write(DELIMITER);
+
+  return verifyResponse(FLASH_END);
+}
+
+/**
+   Handle ESP32 synchronization
+   Returns: SUCCESS or error code
+*/
+int ESP32Flasher::espSyncHandle(void) {
+  do { Serial.print("\n[INFO] ========== Starting ESP32 Sync =========="); Serial.print("\r\n"); } while (0);
+
+  // Command structure (40 bytes total: 4 header + 36 sync sequence)
+  uint8_t cmd_data[40] = {0};
+
+  // Fill header
+  cmd_data[0] = WRITE_DIRECTION;
+  cmd_data[1] = SYNC;
+  cmd_data[2] = 36;  // Size of sync sequence
+  cmd_data[3] = 0;   // Checksum
+
+  // Fill sync sequence
+  cmd_data[4] = 0x07;
+  cmd_data[5] = 0x07;
+  cmd_data[6] = 0x12;
+  cmd_data[7] = 0x20;
+
+  // Fill remaining bytes with 0x55 (sync pattern)
+  for (int i = 8; i < 40; i++) {
+    cmd_data[i] = 0x55;
+  }
+
+  do { Serial.print("[DEBUG] Sending sync sequence..."); Serial.print("\r\n"); } while (0);
+
+  // Send start delimiter
+  Serial2.write(DELIMITER);
+
+  // Send sync command with SLIP encoding
+  for (uint32_t i = 0; i < 40; i++) {
+    if (cmd_data[i] == 0xC0) {
+      Serial2.write((const char *)C0_REPLACEMENT, 2);
+    } else if (cmd_data[i] == 0xDB) {
+      Serial2.write((const char *)DB_REPLACEMENT, 2);
+    } else {
+      Serial2.write((const char *)&cmd_data[i], 1);
+    }
+  }
+
+  // Send end delimiter
+  Serial2.write(DELIMITER);
+
+  // Verify response
+  int response = verifyResponse(SYNC);
+  if (response == SUCCESS) {
+    do { Serial.print("[INFO] Sync successful"); Serial.print("\r\n"); } while (0);
+  } else {
+    Serial.printf("[ERROR] Sync failed with error: %d\n", response);
+  }
+
+  do { Serial.print("================================================\n"); Serial.print("\r\n"); } while (0);
+  return response;
+}
+
+
+
+/**
+   Attach SPI flash
+   @param config: SPI configuration
+   Returns: SUCCESS or error code
+*/
+int ESP32Flasher::spiAttachCmd(uint32_t config) {
+  do { Serial.print("\n[INFO] ========== Attaching SPI Flash =========="); Serial.print("\r\n"); } while (0);
+
+  // Command structure (12 bytes total)
+  uint8_t cmd_data[12] = {0};
+
+  // Fill command data
+  cmd_data[0] = WRITE_DIRECTION;
+  cmd_data[1] = SPI_ATTACH;
+  cmd_data[2] = 8;  // Size of payload (config + zeros)
+  cmd_data[3] = 0;  // Checksum
+
+  // Copy configuration
+  memcpy(&cmd_data[4], &config, 4);
+  // Last 4 bytes remain zero
+
+  // Send start delimiter
+  Serial2.write(DELIMITER);
+
+  // Send command with SLIP encoding
+  for (uint32_t i = 0; i < 12; i++) {
+    if (cmd_data[i] == 0xC0) {
+      Serial2.write((const char *)C0_REPLACEMENT, 2);
+    } else if (cmd_data[i] == 0xDB) {
+      Serial2.write((const char *)DB_REPLACEMENT, 2);
+    } else {
+      Serial2.write((const char *)&cmd_data[i], 1);
+    }
+  }
+
+  // Send end delimiter
+  Serial2.write(DELIMITER);
+
+  // Verify response
+  int response = verifyResponse(SPI_ATTACH);
+  if (response == SUCCESS) {
+    do { Serial.print("[INFO] SPI flash attached successfully"); Serial.print("\r\n"); } while (0);
+  } else {
+    Serial.printf("[ERROR] SPI flash attachment failed with error: %d\n", response);
+  }
+
+  do { Serial.print("================================================\n"); Serial.print("\r\n"); } while (0);
+  return response;
+}
+
+/**
+   Establish connection with ESP32 and prepare for flashing
+   Returns: true if connection successful, false otherwise
+*/
+int ESP32Flasher::espConnect(void) {
+  do { Serial.print("\n[INFO] ========== Starting ESP32 Connection =========="); Serial.print("\r\n"); } while (0);
+  int32_t trials = MAX_TRIALS;
+  int get_sync_status;
+
+  // Put ESP32 into download mode sequence
+  do { Serial.print("[DEBUG] Initiating download mode sequence..."); Serial.print("\r\n"); } while (0);
+
+  // Step 1: Assert BOOT pin
+  digitalWrite(bootPin_, LOW);
+  do { Serial.print("[DEBUG] BOOT pin set LOW - enabling download mode"); Serial.print("\r\n"); } while (0);
+  delay(50);
+
+  // Step 2: Reset sequence
+  digitalWrite(enablePin_, LOW);
+  do { Serial.print("[DEBUG] EN pin set LOW - starting reset"); Serial.print("\r\n"); } while (0);
+  delay(100);
+  digitalWrite(enablePin_, HIGH);
+  do { Serial.print("[DEBUG] EN pin set HIGH - completing reset"); Serial.print("\r\n"); } while (0);
+  delay(50);
+
+  // Step 3: Release BOOT pin
+  digitalWrite(bootPin_, HIGH);
+  do { Serial.print("[DEBUG] BOOT pin set HIGH - ready for sync"); Serial.print("\r\n"); } while (0);
+
+  // Attempt synchronization with timeout and retry
+  do {
+    Serial.printf("[INFO] Sync attempt %d of %d\n", (MAX_TRIALS - trials + 1), MAX_TRIALS);
+    s_time_end = millis() + SYNC_TIMEOUT;
+
+    get_sync_status = espSyncHandle();
+    if (get_sync_status == ERR_TIMEOUT) {
+      Serial.printf("[WARN] Sync timeout on attempt %d\n", (MAX_TRIALS - trials + 1));
+      if (--trials == 0) {
+        do { Serial.print("[ERROR] All sync attempts failed - connection failed"); Serial.print("\r\n"); } while (0);
+        return ERR_TIMEOUT;
+      }
+      delay(100);
+    } else if (get_sync_status != SUCCESS) {
+      Serial.printf("[ERROR] Sync failed with error code: %d\n", get_sync_status);
+      return get_sync_status;
+    }
+  } while (get_sync_status != SUCCESS);
+
+  do { Serial.print("[INFO] ESP32 sync successful!"); Serial.print("\r\n"); } while (0);
+
+  // Attach SPI flash
+  do { Serial.print("[DEBUG] Attaching SPI flash..."); Serial.print("\r\n"); } while (0);
+  s_time_end = millis() + DEFAULT_TIMEOUT;
+  get_sync_status = spiAttachCmd(0);
+
+  if (get_sync_status == SUCCESS) {
+    do { Serial.print("[INFO] SPI flash attached successfully"); Serial.print("\r\n"); } while (0);
+    do { Serial.print("============================================\n"); Serial.print("\r\n"); } while (0);
+    return SUCCESS;
+  } else {
+    Serial.printf("[ERROR] SPI flash attachment failed with code: %d\n", get_sync_status);
+    do { Serial.print("============================================\n"); Serial.print("\r\n"); } while (0);
+    return get_sync_status;
+  }
+}
+
+/**
+   Initialize flash process
+   @param flash_address: Starting address for flash operation
+   @param image_size: Size of image to flash
+   @param block_size: Size of each block to write
+   Returns: SUCCESS or error code
+*/
+int ESP32Flasher::espFlashStart(uint32_t flash_address, uint32_t image_size, uint32_t block_size) {
+  do { Serial.print("[INFO] ========== Initializing Flash Process =========="); Serial.print("\r\n"); } while (0);
+
+  // Validate image size
+  if (image_size > ESP_FLASH_MAX_SIZE) {
+    Serial.printf("[ERROR] Image size %lu exceeds maximum flash size %lu\n",
+                  (unsigned long)image_size, (unsigned long)ESP_FLASH_MAX_SIZE);
+    return ERR_IMG_SIZE;
+  }
+
+  // Calculate number of blocks and erase size
+  uint32_t blocks_to_write = (image_size + block_size - 1) / block_size;
+  uint32_t erase_size = block_size * blocks_to_write;
+  s_flash_write_size = block_size;
+
+  // Calculate timeout based on erase size
+  uint32_t timeout = timeout_per_mb(erase_size, ERASE_REGION_TIMEOUT_PER_MB);
+  s_time_end = millis() + timeout;
+  
+  Serial.printf("[DEBUG] Flash timeout set to: %lu ms\n", (unsigned long)timeout);
+  
+  // Initialize flash operation
+  int result = flashBeginCmd(flash_address, erase_size, block_size, blocks_to_write);
+
+  if (result == SUCCESS) {
+    do { Serial.print("[INFO] Flash initialization successful"); Serial.print("\r\n"); } while (0);
+  } else {
+    Serial.printf("[ERROR] Flash initialization failed with error: %d\n", result);
+  }
+
+  do { Serial.print("================================================\n"); Serial.print("\r\n"); } while (0);
+  return result;
+}
+/**
+   Write data to ESP32 flash
+   @param payload: Data to write
+   @param size: Size of data
+   Returns: SUCCESS or error code
+*/
+int ESP32Flasher::espFlashWrite(void *payload, uint32_t size) {
+
+  // Calculate padding required
+  uint32_t padding_bytes = s_flash_write_size - size;
+  uint8_t *data = (uint8_t *)payload;
+  uint32_t padding_index = size;
+
+  // Add padding if necessary
+  if (padding_bytes > 0) {
+    while (padding_bytes--) {
+      data[padding_index++] = PADDING_PATTERN;
+    }
+  }
+
+  // Set timeout for FLASH_DATA response (write + flash latency).
+  s_time_end = millis() + FLASH_DATA_TIMEOUT;
+
+  // Write data to flash
+  int result = flashDataCmd(data, s_flash_write_size);
+  return result;
+}
+
+/**
+   Initialize the ESP32 Flasher
+   - Sets up serial communication
+   - Configures control pins
+   - Prepares for flashing operations
+*/
+void ESP32Flasher::espFlasherInit(void) {
+  do { Serial.print("\n[INFO] ========== ESP32 Flasher Initialization =========="); Serial.print("\r\n"); } while (0);
+
+  // Initialize serial communication with ESP32
+  Serial2.begin(115200);
+  do { Serial.print("[DEBUG] Serial2 communication initialized at 115200 baud"); Serial.print("\r\n"); } while (0);
+
+  // Configure control pins
+  pinMode(bootPin_, OUTPUT);    // Boot mode control
+  pinMode(enablePin_, OUTPUT);  // Reset control
+
+  do { Serial.print("[DEBUG] Control pins configured:"); Serial.print("\r\n"); } while (0);
+  Serial.printf("  - BOOT_PIN: %d\n", bootPin_);
+  Serial.printf("  - EN_PIN: %d\n", enablePin_);
+
+  do { Serial.print("[INFO] ESP32 Flasher initialization complete"); Serial.print("\r\n"); } while (0);
+  do { Serial.print("================================================\n"); Serial.print("\r\n"); } while (0);
+}
+
+/**
+   Flash a binary stream to the ESP32
+   @param myFile: Name of data stream
+*/
+int ESP32Flasher::espFlashBinStream(Stream &myFile, uint32_t size)  // Flash binary file
+{
+  do { Serial.print("\n[INFO] ========== Starting Binary Stream Flash Process =========="); Serial.print("\r\n"); } while (0);
+  do { Serial.print("[WARN] Do not interrupt the flashing process!"); Serial.print("\r\n"); } while (0);
+  Serial.printf("[INFO] Attempting to flash stream\n");
+
+  const int flashStatus = flashBinaryStream(myFile, size, ESP_FLASH_OFFSET);
+  if (flashStatus != SUCCESS) {
+    Serial.printf("[ERROR] Stream flash failed with error: %d\n", flashStatus);
+    do { Serial.print("================================================\n"); Serial.print("\r\n"); } while (0);
+    return flashStatus;
+  }
+
+  const int endStatus = epsFlashFinish(false);
+  if (endStatus != SUCCESS) {
+    Serial.printf("[ERROR] Flash end command failed with error: %d\n", endStatus);
+    do { Serial.print("================================================\n"); Serial.print("\r\n"); } while (0);
+    return endStatus;
+  }
+
+  // Reset ESP32 after a clean FLASH_END.
+  do { Serial.print("[INFO] Flash completed, resetting ESP32..."); Serial.print("\r\n"); } while (0);
+  digitalWrite(enablePin_, LOW);
+  delay(100);
+  digitalWrite(enablePin_, HIGH);
+
+  do { Serial.print("================================================\n"); Serial.print("\r\n"); } while (0);
+  return SUCCESS;
+}
+
+/**
+   Flash a binary file to the ESP32
+   @param bin_file_name: Name of binary file in SPIFFS
+*/
+/*void ESP32Flasher::espFlashBinFile(const char* bin_file_name) {
+  do { Serial.print("\n[INFO] ========== Starting Binary File Flash Process =========="); Serial.print("\r\n"); } while (0);
+  do { Serial.print("[WARN] Do not interrupt the flashing process!"); Serial.print("\r\n"); } while (0);
+  Serial.printf("[INFO] Attempting to flash file: %s\n", bin_file_name);
+
+  if (SPIFFS.exists(bin_file_name)) {
+    File file_read = SPIFFS.open(bin_file_name, FILE_READ);
+    size_t size = file_read.size();
+
+    Serial.printf("[INFO] File found, size: %d bytes\n", size);
+
+    if (size <= ESP_FLASH_MAX_SIZE) {
+      do { Serial.print("[INFO] File size within valid range"); Serial.print("\r\n"); } while (0);
+      flashBinary(file_read, size, ESP_FLASH_OFFSET);
+    } else {
+      Serial.printf("[ERROR] File size %d exceeds maximum flash size %d\n",
+                    size, ESP_FLASH_MAX_SIZE);
+    }
+    file_read.close();
+  } else {
+    Serial.printf("[ERROR] File %s not found in SPIFFS\n", bin_file_name);
+  }
+
+  // Reset ESP32
+  do { Serial.print("[INFO] Resetting ESP32..."); Serial.print("\r\n"); } while (0);
+  digitalWrite(enablePin_, LOW);
+  delay(100);
+  digitalWrite(enablePin_, HIGH);
+
+  do { Serial.print("================================================\n"); Serial.print("\r\n"); } while (0);
+}*/
+
+/**
+   Flash a binary Stream to ESP32
+   @param file: Reference to the binary file to flash
+   @param address: Flash address to write to
+   Returns: SUCCESS or error code
+*/
+int ESP32Flasher::flashBinaryStream(Stream &myFile, uint32_t size, uint32_t address)
+{
+  //uint8_t payload[256];  // Buffer for flash data chunks
+  uint8_t payload[1024] = { 0 };  // Buffer for flash data chunks
+ // Serial.println("\n[INFO] ========== Starting Binary Flash Process ==========");
+ // Serial.printf("[INFO] File size: %d bytes\n", size);
+  //Serial.printf("[INFO] Flash address: 0x%X\n", address);
+
+  // Step 1: Initialize flash process
+  //Serial.println("[INFO] Erasing flash (this may take a while)...");
+  int flash_start_status = espFlashStart(address, size, sizeof(payload));
+  if (flash_start_status != SUCCESS) {
+     Serial.printf("[ERROR] Flash erase failed with error: %d\n", flash_start_status);
+    return flash_start_status;
+  }
+
+  // Step 2: Program flash
+ // Serial.println("[INFO] Starting programming sequence");
+  //size_t binary_size = size;
+  //size_t written = 0;
+  //int previousProgress = -1;
+
+  const uint32_t total_size = size;
+  uint32_t remaining = size;
+  uint32_t streamIdleSince = millis();
+  uint32_t lastWaitLogMs = streamIdleSince;
+  uint32_t lastProgressLogMs = streamIdleSince;
+  uint32_t lastProgressLoggedBytes = 0;
+  myFile.setTimeout(250);
+
+  Serial.printf("[INFO] Stream writer started: total=%lu block=%u stall_timeout=%u ms\n",
+                (unsigned long)total_size,
+                (unsigned)sizeof(payload),
+                (unsigned)STREAM_STALL_TIMEOUT);
+
+  // Write data in chunks
+  while (remaining > 0) {
+    const uint32_t chunkCap = sizeof(payload);
+    uint32_t toRead = chunkCap;
+    if (toRead > remaining) toRead = remaining;
+
+    uint32_t chunkRead = 0U;
+    while (chunkRead < toRead) {
+      // Read directly from stream; do not gate on available() to avoid false stalls.
+      const int c = myFile.readBytes((char*)(payload + chunkRead), toRead - chunkRead);
+      if (c <= 0) {
+        const uint32_t nowMs = millis();
+        const uint32_t idleMs = (uint32_t)(nowMs - streamIdleSince);
+        const int availNow = myFile.available();
+        const uint32_t written = total_size - remaining;
+        if ((uint32_t)(nowMs - lastWaitLogMs) >= 5000U) {
+          Serial.printf("[DEBUG] Waiting stream data... written=%lu remaining=%lu chunk=%lu/%lu idle=%lu ms avail=%d\n",
+                        (unsigned long)written,
+                        (unsigned long)remaining,
+                        (unsigned long)chunkRead,
+                        (unsigned long)toRead,
+                        (unsigned long)idleMs,
+                        availNow);
+          lastWaitLogMs = nowMs;
+        }
+        if (idleMs > STREAM_STALL_TIMEOUT) {
+          const uint32_t elapsedMs = (uint32_t)(nowMs - lastProgressLogMs);
+          Serial.printf("[ERROR] Stream read timeout at offset=%lu (remaining=%lu chunk=%lu/%lu idle=%lu elapsed=%lu avail=%d)\n",
+                        (unsigned long)written,
+                        (unsigned long)remaining,
+                        (unsigned long)chunkRead,
+                        (unsigned long)toRead,
+                        (unsigned long)idleMs,
+                        (unsigned long)elapsedMs,
+                        availNow);
+          return ERR_TIMEOUT;
+        }
+        delay(2);
+        continue;
+      }
+      chunkRead += (uint32_t)c;
+      streamIdleSince = millis();
+      lastWaitLogMs = streamIdleSince;
+    }
+
+
+    // Calculate chunk size
+    //   size_t to_read = MIN(size, sizeof(payload));
+
+    // Read chunk from file
+    //   myFile.readBytes(payload, to_read);
+
+    // Write chunk to flash
+    flash_start_status = espFlashWrite(payload, toRead);
+    if (flash_start_status != SUCCESS) {
+      const uint32_t written = total_size - remaining;
+        Serial.printf("[ERROR] Flash write failed at offset=%lu chunk=%d err=%d\n",
+                      (unsigned long)written,
+                      (int)toRead,
+                      flash_start_status);
+        return flash_start_status;
+    }
+    // Update progress
+    //size -= to_read;
+    //written += to_read;
+
+    // Display progress
+    //int progress = (int)(((float)written / binary_size) * 100);
+    //if (previousProgress != progress) {
+    // previousProgress = progress;
+       //Serial.printf("[INFO] Programming progress: %d%% (%d/%d)\n", progress,written,binary_size);  
+      //Callback function called at every new percent done
+    if (_updateProgressCallback) _updateProgressCallback();
+    remaining -= toRead;
+    const uint32_t written = total_size - remaining;
+    const uint32_t nowMs = millis();
+    if ((written - lastProgressLoggedBytes) >= (32U * 1024U) || remaining == 0 ||
+        (uint32_t)(nowMs - lastProgressLogMs) >= 5000U) {
+      const uint32_t elapsedMs = (uint32_t)(nowMs - lastProgressLogMs);
+      const uint32_t rate = (elapsedMs > 0U) ? (uint32_t)(((uint64_t)(written - lastProgressLoggedBytes) * 1000ULL) / elapsedMs) : 0U;
+      Serial.printf("[DEBUG] Stream progress: written=%lu/%lu (%.1f%%) rate=%lu B/s\n",
+                    (unsigned long)written,
+                    (unsigned long)total_size,
+                    total_size > 0 ? (100.0f * (float)written / (float)total_size) : 0.0f,
+                    (unsigned long)rate);
+      lastProgressLogMs = nowMs;
+      lastProgressLoggedBytes = written;
+    }
+    delay(1);
+  }
+
+//  Serial.println("[INFO] Programming complete!");
+//  Serial.println("================================================\n");
+  return SUCCESS;
+}
+
+/**
+   Flash a binary file to ESP32
+   @param file: Reference to the binary file to flash
+   @param size: Size of the binary file
+   @param address: Flash address to write to
+   Returns: SUCCESS or error code
+*/
+/*
+int ESP32Flasher::flashBinary(File& file, uint32_t size, uint32_t address) {
+  uint8_t payload[1024];  // Buffer for flash data chunks
+
+  do { Serial.print("\n[INFO] ========== Starting Binary Flash Process =========="); Serial.print("\r\n"); } while (0);
+  Serial.printf("[INFO] File size: %d bytes\n", size);
+  Serial.printf("[INFO] Flash address: 0x%X\n", address);
+
+  // Step 1: Initialize flash process
+  do { Serial.print("[INFO] Erasing flash (this may take a while)..."); Serial.print("\r\n"); } while (0);
+  int flash_start_status = espFlashStart(address, size, sizeof(payload));
+  if (flash_start_status != SUCCESS) {
+    Serial.printf("[ERROR] Flash erase failed with error: %d\n", flash_start_status);
+    return flash_start_status;
+  }
+
+  // Step 2: Program flash
+  do { Serial.print("[INFO] Starting programming sequence"); Serial.print("\r\n"); } while (0);
+  size_t binary_size = size;
+  size_t written = 0;
+  int previousProgress = -1;
+
+  // Write data in chunks
+  while (size > 0) {
+    // Calculate chunk size
+    size_t to_read = MIN(size, sizeof(payload));
+
+    // Read chunk from file
+    file.read(payload, to_read);
+
+    // Write chunk to flash
+    flash_start_status = espFlashWrite(payload, to_read);
+    if (flash_start_status != SUCCESS) {
+      Serial.printf("[ERROR] Flash write failed at offset 0x%X with error: %d\n",
+                    written, flash_start_status);
+      return flash_start_status;
+    }
+
+    // Update progress
+    size -= to_read;
+    written += to_read;
+
+    // Display progress
+    int progress = (int)(((float)written / binary_size) * 100);
+    if (previousProgress != progress) {
+      previousProgress = progress;
+      Serial.printf("[INFO] Programming progress: %d%%\n", progress);
+    }
+  }
+
+  do { Serial.print("[INFO] Programming complete!"); Serial.print("\r\n"); } while (0);
+  do { Serial.print("================================================\n"); Serial.print("\r\n"); } while (0);
+  return SUCCESS;
+}*/
+
+int ESP32Flasher::epsFlashFinish(bool reboot)
+{
+  int result = ERR_FAIL;
+  const bool primaryStayInLoader = !reboot;
+  for (int attempt = 1; attempt <= FLASH_END_RETRIES; ++attempt) {
+    flushUartInput_(25U);
+    s_time_end = millis() + FLASH_END_TIMEOUT;
+    result = flashEndCmd(primaryStayInLoader);
+    if (result == SUCCESS) {
+      if (attempt > 1) {
+        Serial.printf("[INFO] FLASH_END recovered on retry %d/%d\n", attempt, FLASH_END_RETRIES);
+      }
+      return SUCCESS;
+    }
+
+    Serial.printf("[WARN] FLASH_END failed attempt %d/%d (err=%d boot_status=0x%02X)\n",
+                  attempt,
+                  FLASH_END_RETRIES,
+                  result,
+                  (unsigned)lastCommandFailCode_);
+    if (attempt < FLASH_END_RETRIES) {
+      const int recoverStatus = recoverBootloaderLink_(2000U);
+      if (recoverStatus == SUCCESS) {
+        Serial.printf("[INFO] Bootloader link recovered before FLASH_END retry %d\n", attempt + 1);
+      } else {
+        Serial.printf("[WARN] Bootloader recover failed before retry %d (err=%d)\n", attempt + 1, recoverStatus);
+      }
+      delay(120);
+    }
+  }
+
+  if (primaryStayInLoader) {
+    Serial.print("[WARN] FLASH_END stay-in-loader variant failed, trying reboot variant\r\n");
+    (void)recoverBootloaderLink_(2500U);
+    flushUartInput_(30U);
+    s_time_end = millis() + FLASH_END_TIMEOUT;
+    result = flashEndCmd(false);
+    if (result == SUCCESS) {
+      Serial.print("[INFO] FLASH_END reboot variant succeeded\r\n");
+      return SUCCESS;
+    }
+    Serial.printf("[WARN] FLASH_END reboot variant failed (err=%d boot_status=0x%02X)\n",
+                  result,
+                  (unsigned)lastCommandFailCode_);
+  }
+
+  return result;
+}
