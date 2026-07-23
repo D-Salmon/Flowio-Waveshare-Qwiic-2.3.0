@@ -57,9 +57,11 @@ private:
     static constexpr uint8_t MAX_HA_SWITCHES = Limits::Ha::Capacity::MaxSwitches;
     static constexpr uint8_t MAX_HA_NUMBERS = Limits::Ha::Capacity::MaxNumbers;
     static constexpr uint8_t MAX_HA_BUTTONS = Limits::Ha::Capacity::MaxButtons;
+    static constexpr uint8_t MAX_HA_SELECTS = Limits::Ha::Capacity::MaxSelects;
     static constexpr uint8_t MAX_HA_DISCOVERY_CLEANUPS = Limits::Ha::Capacity::MaxDiscoveryCleanups;
     static constexpr uint16_t MAX_HA_ENTITIES =
-        MAX_HA_SENSORS + MAX_HA_BINARY_SENSORS + MAX_HA_SWITCHES + MAX_HA_NUMBERS + MAX_HA_BUTTONS;
+        MAX_HA_SENSORS + MAX_HA_BINARY_SENSORS + MAX_HA_SWITCHES + MAX_HA_NUMBERS +
+        MAX_HA_SELECTS + MAX_HA_BUTTONS;
     static constexpr uint16_t MAX_HA_MESSAGES = MAX_HA_ENTITIES + MAX_HA_DISCOVERY_CLEANUPS;
     static constexpr uint16_t HA_PENDING_WORDS = (MAX_HA_MESSAGES + 31U) / 32U;
 
@@ -101,6 +103,7 @@ private:
     HASwitchEntry* switches_ = nullptr;
     HANumberEntry* numbers_ = nullptr;
     HAButtonEntry* buttons_ = nullptr;
+    HASelectEntry* selects_ = nullptr;
     uint32_t* pendingBits_ = nullptr;
 #else
     HASensorEntry sensors_[MAX_HA_SENSORS]{};
@@ -108,6 +111,7 @@ private:
     HASwitchEntry switches_[MAX_HA_SWITCHES]{};
     HANumberEntry numbers_[MAX_HA_NUMBERS]{};
     HAButtonEntry buttons_[MAX_HA_BUTTONS]{};
+    HASelectEntry selects_[MAX_HA_SELECTS]{};
     uint32_t pendingBits_[HA_PENDING_WORDS] = {0};
 #endif
     uint8_t sensorCount_ = 0;
@@ -115,6 +119,7 @@ private:
     uint8_t switchCount_ = 0;
     uint8_t numberCount_ = 0;
     uint8_t buttonCount_ = 0;
+    uint8_t selectCount_ = 0;
 
     MqttPublishProducer producer_{};
     MqttConfigRouteProducer* cfgMqttPub_ = nullptr;
@@ -151,8 +156,10 @@ private:
     bool addBinarySensorSvc_(const HABinarySensorEntry* entry);
     bool addSwitchSvc_(const HASwitchEntry* entry);
     bool addNumberSvc_(const HANumberEntry* entry);
+    bool addSelectSvc_(const HASelectEntry* entry);
     bool addButtonSvc_(const HAButtonEntry* entry);
     bool requestRefreshSvc_();
+    bool setEntityAbsentSvc_(const char* ownerId, const char* objectSuffix, bool absent);
     bool ensureStorage_();
     void releaseOneShotResources_();
     size_t entityTableUsedBytes_() const;
@@ -161,6 +168,7 @@ private:
     bool addBinarySensorEntry(const HABinarySensorEntry& entry);
     bool addSwitchEntry(const HASwitchEntry& entry);
     bool addNumberEntry(const HANumberEntry& entry);
+    bool addSelectEntry(const HASelectEntry& entry);
     bool addButtonEntry(const HAButtonEntry& entry);
 
     void requestAutoconfigRefresh();
@@ -226,6 +234,16 @@ private:
                        const char* entityCategory = nullptr,
                        const char* icon = nullptr,
                        MqttBuildContext* outCtx = nullptr);
+    bool publishSelect(const char* objectId, const char* name,
+                       const char* stateTopic, const char* valueTemplate,
+                       const char* commandTopic, const char* commandTemplate,
+                       const char* optionsJson,
+                       const char* icon = nullptr,
+                       const char* entityCategory = nullptr,
+                       MqttBuildContext* outCtx = nullptr);
+    bool publishTombstone_(const char* component,
+                           const char* objectSuffix,
+                           MqttBuildContext& outCtx);
     bool publishDiscovery(const char* component, const char* objectId, MqttBuildContext& outCtx);
 
     static void makeDeviceId(char* out, size_t len);
@@ -237,8 +255,10 @@ private:
         ServiceBinding::bind<&HAModule::addBinarySensorSvc_>,
         ServiceBinding::bind<&HAModule::addSwitchSvc_>,
         ServiceBinding::bind<&HAModule::addNumberSvc_>,
+        ServiceBinding::bind<&HAModule::addSelectSvc_>,
         ServiceBinding::bind<&HAModule::addButtonSvc_>,
         ServiceBinding::bind<&HAModule::requestRefreshSvc_>,
+        ServiceBinding::bind<&HAModule::setEntityAbsentSvc_>,
         this
     };
 };

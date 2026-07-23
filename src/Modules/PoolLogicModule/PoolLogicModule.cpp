@@ -33,12 +33,9 @@ static void poolLogicCfgDocsAnchor_(PoolLogicModule& self)
     self.electrolyseModeVar_.moduleName = kCfgModuleMode;
     self.electroRunModeVar_.moduleName = kCfgModuleMode;
 
-    self.tempLowVar_.moduleName = kCfgModuleFiltration;
-    self.tempSetpointVar_.moduleName = kCfgModuleFiltration;
-    self.startMinVar_.moduleName = kCfgModuleFiltration;
-    self.stopMaxVar_.moduleName = kCfgModuleFiltration;
     self.calcStartVar_.moduleName = kCfgModuleFiltration;
     self.calcStopVar_.moduleName = kCfgModuleFiltration;
+    self.calcDurationVar_.moduleName = kCfgModuleFiltration;
 
     self.phIdVar_.moduleName = kCfgModuleSensors;
     self.orpIdVar_.moduleName = kCfgModuleSensors;

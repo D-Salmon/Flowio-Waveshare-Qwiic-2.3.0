@@ -113,12 +113,9 @@ void PoolLogicModule::init(ConfigStore& cfg, ServiceRegistry& services)
     electrolyseModeVar_.moduleName = kCfgModuleMode;
     electroRunModeVar_.moduleName = kCfgModuleMode;
 
-    tempLowVar_.moduleName = kCfgModuleFiltration;
-    tempSetpointVar_.moduleName = kCfgModuleFiltration;
-    startMinVar_.moduleName = kCfgModuleFiltration;
-    stopMaxVar_.moduleName = kCfgModuleFiltration;
     calcStartVar_.moduleName = kCfgModuleFiltration;
     calcStopVar_.moduleName = kCfgModuleFiltration;
+    calcDurationVar_.moduleName = kCfgModuleFiltration;
 
     phIdVar_.moduleName = kCfgModuleSensors;
     orpIdVar_.moduleName = kCfgModuleSensors;
@@ -181,12 +178,9 @@ void PoolLogicModule::init(ConfigStore& cfg, ServiceRegistry& services)
     cfg.registerVar(electrolyseModeVar_, kCfgModuleId, kCfgBranchMode);
     cfg.registerVar(electroRunModeVar_, kCfgModuleId, kCfgBranchMode);
 
-    cfg.registerVar(tempLowVar_, kCfgModuleId, kCfgBranchFiltration);
-    cfg.registerVar(tempSetpointVar_, kCfgModuleId, kCfgBranchFiltration);
-    cfg.registerVar(startMinVar_, kCfgModuleId, kCfgBranchFiltration);
-    cfg.registerVar(stopMaxVar_, kCfgModuleId, kCfgBranchFiltration);
     cfg.registerVar(calcStartVar_, kCfgModuleId, kCfgBranchFiltration);
     cfg.registerVar(calcStopVar_, kCfgModuleId, kCfgBranchFiltration);
+    cfg.registerVar(calcDurationVar_, kCfgModuleId, kCfgBranchFiltration);
 
     cfg.registerVar(phIdVar_, kCfgModuleId, kCfgBranchSensors);
     cfg.registerVar(orpIdVar_, kCfgModuleId, kCfgBranchSensors);
@@ -241,7 +235,8 @@ void PoolLogicModule::init(ConfigStore& cfg, ServiceRegistry& services)
     schedSvc_ = services.get<TimeSchedulerService>(ServiceId::TimeScheduler);
     ioSvc_ = services.get<IOServiceV2>(ServiceId::Io);
     poolSvc_ = services.get<PoolDeviceService>(ServiceId::PoolDevice);
-    const HAService* haSvc = services.get<HAService>(ServiceId::Ha);
+    haSvc_ = services.get<HAService>(ServiceId::Ha);
+    const HAService* haSvc = haSvc_;
     const CommandService* cmdSvc = services.get<CommandService>(ServiceId::Command);
     alarmSvc_ = services.get<AlarmService>(ServiceId::Alarm);
     if (!ioSvc_) {
@@ -299,7 +294,8 @@ void PoolLogicModule::init(ConfigStore& cfg, ServiceRegistry& services)
             "{\\\"poollogic/mode\\\":{\\\"orp_auto_mode\\\":true}}",
             "{\\\"poollogic/mode\\\":{\\\"orp_auto_mode\\\":false}}",
             "mdi:water-check-outline",
-            "config"
+            "config",
+            true
         };
         const HASwitchEntry heaterAutoModeSwitch{
             "poollogic",
@@ -335,7 +331,8 @@ void PoolLogicModule::init(ConfigStore& cfg, ServiceRegistry& services)
             "{\\\"poollogic/mode\\\":{\\\"elec_mode\\\":true}}",
             "{\\\"poollogic/mode\\\":{\\\"elec_mode\\\":false}}",
             "mdi:flash",
-            "config"
+            "config",
+            true
         };
         const HASwitchEntry chlorineGeneratorOrpControlSwitch{
             "poollogic",
@@ -358,26 +355,48 @@ void PoolLogicModule::init(ConfigStore& cfg, ServiceRegistry& services)
         (void)haSvc->addSwitch(haSvc->ctx, &chlorineGeneratorModeSwitch);
         (void)haSvc->addSwitch(haSvc->ctx, &chlorineGeneratorOrpControlSwitch);
     }
+    if (haSvc && haSvc->addSelect) {
+        const HASelectEntry disinfectionMode{
+            "poollogic",
+            "pl_disinfection_mode",
+            "Mode de desinfection",
+            "cfg/poollogic/mode",
+            "{% if value_json.elec_mode %}electrolyseur{% elif value_json.orp_auto_mode %}chlore_liquide{% else %}desactive{% endif %}",
+            MqttTopics::SuffixCmd,
+            "{\\\"cmd\\\":\\\"poollogic.disinfection_mode.set\\\",\\\"args\\\":{\\\"value\\\":\\\"{{ value }}\\\"}}",
+            "[\"desactive\",\"electrolyseur\",\"chlore_liquide\"]",
+            "mdi:water-sync",
+            "config",
+            false
+        };
+        (void)haSvc->addSelect(haSvc->ctx, &disinfectionMode);
+    }
     if (haSvc && haSvc->addSensor) {
         const HASensorEntry filtrationStart{
             "poollogic",
             "pl_flt_start",
             "Calculated Filtration Start",
             "cfg/poollogic/filtration",
-            "{{ value_json.filtr_start_clc | int(0) }}",
+            "{% set m=value_json.filtr_start_minute | int(0) %}{{ '%02d:%02d' | format(m // 60, m % 60) }}",
             nullptr,
             "mdi:clock-start",
-            "h"
+            nullptr,
+            false,
+            nullptr,
+            true
         };
         const HASensorEntry filtrationStop{
             "poollogic",
             "pl_flt_stop",
             "Calculated Filtration Stop",
             "cfg/poollogic/filtration",
-            "{{ value_json.filtr_stop_clc | int(0) }}",
+            "{% set m=value_json.filtr_stop_minute | int(0) %}{{ '%02d:%02d' | format(m // 60, m % 60) }}",
             nullptr,
             "mdi:clock-end",
-            "h"
+            nullptr,
+            false,
+            nullptr,
+            true
         };
         static const char* kHeatAssistStatusFrTemplate =
             R"({% set st = value_json.ri | default('UNKNOWN', true) %}{% if st == 'DISABLED' %}Désactivé{% elif st == 'MANUAL_MODE' %}Mode manuel{% elif st == 'PSI_BLOCKED' %}Pression bloquée{% elif st == 'SETPOINT_INVALID' %}Consigne invalide{% elif st == 'TEMP_UNAVAILABLE' %}Température indisponible{% elif st == 'PROBE_WAIT_30M' %}Attente sonde 30 min{% elif st == 'PROBE_WAIT_20M' %}Attente sonde 20 min{% elif st == 'PROBE_RUNNING' %}Sondage en cours{% elif st == 'HEATING' %}Chauffe active{% elif st == 'IDLE_PUMP_ON' %}Pompe active sans chauffe{% elif st == 'SETPOINT_REACHED' %}Consigne atteinte{% else %}Inconnu{% endif %})";
@@ -399,54 +418,6 @@ void PoolLogicModule::init(ConfigStore& cfg, ServiceRegistry& services)
         (void)haSvc->addSensor(haSvc->ctx, &heatAssistStatus);
     }
     if (haSvc && haSvc->addNumber) {
-        const HANumberEntry waterTempSetpoint{
-            "poollogic",
-            "pl_wat_temp_sp",
-            "Water Temperature Setpoint",
-            "cfg/poollogic/filtration",
-            "{{ value_json.wat_temp_setpt | float(0) }}",
-            MqttTopics::SuffixCfgSet,
-            "{\\\"poollogic/filtration\\\":{\\\"wat_temp_setpt\\\":{{ value | float(0) }}}}",
-            5.0f,
-            35.0f,
-            0.1f,
-            "slider",
-            "config",
-            "mdi:thermometer-water",
-            "C"
-        };
-        const HANumberEntry filtrationStartMin{
-            "poollogic",
-            "pl_flt_start_min",
-            "Min Start Filtration Pump",
-            "cfg/poollogic/filtration",
-            "{{ value_json.filtr_start_min | int(0) }}",
-            MqttTopics::SuffixCfgSet,
-            "{\\\"poollogic/filtration\\\":{\\\"filtr_start_min\\\":{{ value | int(0) }}}}",
-            0.0f,
-            23.0f,
-            1.0f,
-            "box",
-            "config",
-            "mdi:clock-start",
-            "h"
-        };
-        const HANumberEntry filtrationStopMax{
-            "poollogic",
-            "pl_flt_stop_max",
-            "Max End Filtration Pump",
-            "cfg/poollogic/filtration",
-            "{{ value_json.filtr_stop_max | int(0) }}",
-            MqttTopics::SuffixCfgSet,
-            "{\\\"poollogic/filtration\\\":{\\\"filtr_stop_max\\\":{{ value | int(0) }}}}",
-            0.0f,
-            23.0f,
-            1.0f,
-            "box",
-            "config",
-            "mdi:clock-end",
-            "h"
-        };
         const HANumberEntry delayPidsMin{
             "poollogic",
             "pl_dly_pid",
@@ -623,10 +594,7 @@ void PoolLogicModule::init(ConfigStore& cfg, ServiceRegistry& services)
             "mdi:gauge-full",
             "bar"
         };
-        (void)haSvc->addNumber(haSvc->ctx, &waterTempSetpoint);
         (void)haSvc->addNumber(haSvc->ctx, &heaterSetpoint);
-        (void)haSvc->addNumber(haSvc->ctx, &filtrationStartMin);
-        (void)haSvc->addNumber(haSvc->ctx, &filtrationStopMax);
         (void)haSvc->addNumber(haSvc->ctx, &delayPidsMin);
         (void)haSvc->addNumber(haSvc->ctx, &delayElectroMin);
         (void)haSvc->addNumber(haSvc->ctx, &fillMinUptime);
@@ -654,6 +622,7 @@ void PoolLogicModule::init(ConfigStore& cfg, ServiceRegistry& services)
         cmdSvc->registerHandler(cmdSvc->ctx, "poollogic.filtration.write", &PoolLogicModule::cmdFiltrationWriteStatic_, this);
         cmdSvc->registerHandler(cmdSvc->ctx, "poollogic.filtration.recalc", &PoolLogicModule::cmdFiltrationRecalcStatic_, this);
         cmdSvc->registerHandler(cmdSvc->ctx, "poollogic.auto_mode.set", &PoolLogicModule::cmdAutoModeSetStatic_, this);
+        cmdSvc->registerHandler(cmdSvc->ctx, "poollogic.disinfection_mode.set", &PoolLogicModule::cmdDisinfectionModeSetStatic_, this);
         static constexpr const char* kMqttControlCmds[] = {
             "poollogic.auto_mode.toggle",
             "poollogic.ph_auto_mode.set",
@@ -840,6 +809,8 @@ void PoolLogicModule::init(ConfigStore& cfg, ServiceRegistry& services)
 void PoolLogicModule::onConfigLoaded(ConfigStore&, ServiceRegistry& services)
 {
     mqttSvc_ = services.get<MqttService>(ServiceId::Mqtt);
+    activityLog_ = services.get<ActivityLogService>(ServiceId::ActivityLog);
+    syncDisinfectionHaEntities_();
     if (!cfgMqttPub_) {
         cfgMqttPub_ = new (std::nothrow) MqttConfigRouteProducer();
     }
@@ -859,15 +830,27 @@ void PoolLogicModule::onConfigLoaded(ConfigStore&, ServiceRegistry& services)
 
     ensureDailySlot_();
 
-    if (schedSvc_ && schedSvc_->isActive) {
-        filtrationWindowActive_ = schedSvc_->isActive(schedSvc_->ctx, SLOT_FILTR_WINDOW);
-    }
-
-    // Trigger one recompute on startup, after persisted config and scheduler
-    // blob are fully loaded, so the window reflects the final restored state.
+    // A persisted plan survives ordinary restarts. Only a first commissioning
+    // (duration=0) uses the temperature observed at boot.
     portENTER_CRITICAL(&pendingMux_);
-    pendingDailyRecalc_ = true;
+    pendingStartupPlan_ = true;
     portEXIT_CRITICAL(&pendingMux_);
+}
+
+void PoolLogicModule::syncDisinfectionHaEntities_()
+{
+    if (!haSvc_ || !haSvc_->setEntityAbsent) return;
+
+    const bool electrolysis = electrolyseMode_;
+    const bool liquidChlorine = !electrolysis && orpAutoMode_;
+
+    // Only expose the actuator and settings that belong to the selected
+    // disinfection technology. Empty retained discovery messages remove stale
+    // entities from Home Assistant when the mode changes.
+    (void)haSvc_->setEntityAbsent(haSvc_->ctx, "io", "io_chl_gen", !electrolysis);
+    (void)haSvc_->setEntityAbsent(haSvc_->ctx, "io", "io_chl_pmp", !liquidChlorine);
+    (void)haSvc_->setEntityAbsent(haSvc_->ctx, "poollogic", "pl_chl_gen_orp", !electrolysis);
+    (void)haSvc_->setEntityAbsent(haSvc_->ctx, "poollogic", "pl_chl_gen_min_temp", !electrolysis);
 }
 
 void PoolLogicModule::loop()
@@ -879,17 +862,41 @@ void PoolLogicModule::loop()
 
     // The loop only consumes latched scheduler events; actual work stays in the
     // task context to avoid doing heavy operations from event callbacks.
-    bool doRecalc = false;
+    bool doStartupPlan = false;
+    bool doManualRecalc = false;
     bool doDayReset = false;
     portENTER_CRITICAL(&pendingMux_);
-    doRecalc = pendingDailyRecalc_;
-    pendingDailyRecalc_ = false;
+    doStartupPlan = pendingStartupPlan_;
+    pendingStartupPlan_ = false;
+    doManualRecalc = pendingManualRecalc_;
+    pendingManualRecalc_ = false;
     doDayReset = pendingDayReset_;
     pendingDayReset_ = false;
     portEXIT_CRITICAL(&pendingMux_);
 
-    if (doRecalc) {
-        (void)recalcAndApplyFiltrationWindow_();
+    if (doStartupPlan) {
+        if (filtrationCalcDurationMinute_ >= 120U &&
+            filtrationCalcDurationMinute_ <= (24U * 60U)) {
+            (void)applyStoredFiltrationPlan_();
+        } else {
+            float waterTemp = 0.0f;
+            if (loadAnalogSensor_(waterTempIoId_, waterTemp)) {
+                (void)calculateAndStoreNextFiltrationPlan_(waterTemp, true);
+            } else {
+                // Safe first-commissioning fallback: winter two-hour window.
+                (void)calculateAndStoreNextFiltrationPlan_(0.0f, true);
+                LOGW("Startup water temperature unavailable; using 23:00-01:00 fallback");
+            }
+        }
+    }
+
+    if (doManualRecalc) {
+        float waterTemp = 0.0f;
+        if (loadAnalogSensor_(waterTempIoId_, waterTemp)) {
+            (void)calculateAndStoreNextFiltrationPlan_(waterTemp, true);
+        } else {
+            LOGW("Manual filtration recalculation skipped: water temperature unavailable");
+        }
     }
 
     if (doDayReset) {
@@ -916,19 +923,17 @@ void PoolLogicModule::onEvent_(const Event& e)
         const ConfigChangedPayload* p = (const ConfigChangedPayload*)e.payload;
         if (p->moduleId == (uint8_t)ConfigModuleId::PoolLogic &&
             p->localBranchId == kCfgBranchFiltration) {
-            if (strcmp(p->nvsKey, NvsKeys::PoolLogic::FiltrationCalcStart) == 0 ||
-                strcmp(p->nvsKey, NvsKeys::PoolLogic::FiltrationCalcStop) == 0) {
-                (void)applyFiltrationWindowSlot_(filtrationCalcStart_, filtrationCalcStop_);
-            } else {
-                portENTER_CRITICAL(&pendingMux_);
-                pendingDailyRecalc_ = true;
-                portEXIT_CRITICAL(&pendingMux_);
-            }
+            // Calculated values describe the next cycle. They must not change
+            // the duration of the cycle currently running.
             return;
         }
         if (p->moduleId == (uint8_t)ConfigModuleId::PoolLogic &&
             p->localBranchId == kCfgBranchMode &&
             p->nvsKey) {
+            if (strcmp(p->nvsKey, NvsKeys::PoolLogic::ElectrolyseMode) == 0 ||
+                strcmp(p->nvsKey, NvsKeys::PoolLogic::OrpAutoMode) == 0) {
+                syncDisinfectionHaEntities_();
+            }
             if (strcmp(p->nvsKey, NvsKeys::PoolLogic::AutoMode) == 0 && autoMode_) {
                 portENTER_CRITICAL(&pendingMux_);
                 pendingFiltrationReconcile_ = true;
@@ -965,9 +970,12 @@ void PoolLogicModule::onEvent_(const Event& e)
     const SchedulerEdge edge = (SchedulerEdge)p->edge;
 
     if (p->eventId == POOLLOGIC_EVENT_DAILY_RECALC && edge == SchedulerEdge::Trigger) {
-        portENTER_CRITICAL(&pendingMux_);
-        pendingDailyRecalc_ = true;
-        portEXIT_CRITICAL(&pendingMux_);
+        // A 24 h plan has no stop edge. Adopt its staged plan daily and take a
+        // fresh five-minute sample while circulation remains established.
+        if (filtrationContinuous_) {
+            (void)applyStoredFiltrationPlan_();
+            if (filtrationFsm_.on) armFiltrationTemperatureSampling_();
+        }
         return;
     }
 

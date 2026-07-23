@@ -50,6 +50,28 @@ const char* poolDeviceBlockReasonStr_(uint8_t reason)
 }
 }  // namespace
 
+void PoolLogicModule::emitActivity_(ActivityCode code,
+                                    const char* title,
+                                    const char* detail,
+                                    uint8_t slot,
+                                    bool state,
+                                    ActivitySeverity severity,
+                                    ActivitySource source) const
+{
+    if (!activityLog_ || !activityLog_->emit) return;
+    ActivityEvent event{};
+    event.code = (uint16_t)code;
+    event.domain = (uint8_t)ActivityDomain::PoolLogic;
+    event.source = (uint8_t)source;
+    event.severity = (uint8_t)severity;
+    event.targetSlot = slot;
+    event.state = state;
+    snprintf(event.title, sizeof(event.title), "%s", title ? title : "Piscine");
+    snprintf(event.detail, sizeof(event.detail), "%s", detail ? detail : "");
+    snprintf(event.icon, sizeof(event.icon), "%s", state ? "play_arrow" : "stop");
+    (void)activityLog_->emit(activityLog_->ctx, &event);
+}
+
 // Alarm conditions intentionally stay close to the control helpers because they
 // read the same live IO/runtime state and should evolve together.
 AlarmCondState PoolLogicModule::condPsiLowStatic_(void* ctx, uint32_t nowMs)
@@ -386,6 +408,11 @@ void PoolLogicModule::applyDeviceControl_(uint8_t deviceSlot,
     if (desiredChanged || needRetry) {
         if (writeDeviceDesired_(deviceSlot, desired)) {
             LOGI("%s %s", desired ? "Start" : "Stop", label ? label : "Pool Device");
+            emitActivity_(desired ? ActivityCode::DeviceStartRequested : ActivityCode::DeviceStopRequested,
+                          desired ? "Demarrage demande" : "Arret demande",
+                          label ? label : "Equipement piscine",
+                          deviceSlot,
+                          desired);
         }
         fsm.lastCmdMs = nowMs;
     }
@@ -412,12 +439,19 @@ void PoolLogicModule::runControlLoop_(uint32_t nowMs)
     syncDeviceState_(heaterDeviceSlot_, heaterFsm_, nowMs, unusedStart, unusedStop);
 
     if (filtrationStarted) {
+        armFiltrationTemperatureSampling_();
         phPidEnabled_ = false;
         orpPidEnabled_ = false;
         resetTemporalPidState_(phPidState_, nowMs);
         resetTemporalPidState_(orpPidState_, nowMs);
     }
     if (filtrationStopped) {
+        filtrationTempSamplingArmed_ = false;
+        if (filtrationTempPlanStored_) {
+            if (applyStoredFiltrationPlan_()) {
+                filtrationTempPlanStored_ = false;
+            }
+        }
         phPidEnabled_ = false;
         orpPidEnabled_ = false;
         resetTemporalPidState_(phPidState_, nowMs);
@@ -449,6 +483,10 @@ void PoolLogicModule::runControlLoop_(uint32_t nowMs)
     const bool haveLevel = loadDigitalSensor_(levelIoId_, poolLevelOn);
     const bool havePhTankLow = tankLevelMonitoringEnabled_ && loadDigitalSensor_(phLevelIoId_, phTankLow);
     const bool haveChlorineTankLow = tankLevelMonitoringEnabled_ && loadDigitalSensor_(chlorineLevelIoId_, chlorineTankLow);
+
+    // The next cycle is calculated from water that has circulated long enough
+    // to make the probe representative, not from stagnant pipework.
+    updateFiltrationTemperatureSampling_(nowMs, waterTempFresh, waterTemp);
 
     // Prefer centralized alarm state when available; otherwise fall back to a
     // local safety latch so standalone behavior remains conservative.
@@ -512,8 +550,11 @@ void PoolLogicModule::runControlLoop_(uint32_t nowMs)
     forceFiltrationReconcile = pendingFiltrationReconcile_;
     pendingFiltrationReconcile_ = false;
     portEXIT_CRITICAL(&pendingMux_);
-    if (forceFiltrationReconcile && schedSvc_ && schedSvc_->isActive) {
-        windowActive = schedSvc_->isActive(schedSvc_->ctx, SLOT_FILTR_WINDOW);
+    if (forceFiltrationReconcile) {
+        windowActive = filtrationContinuous_;
+        if (!filtrationContinuous_ && schedSvc_ && schedSvc_->isActive) {
+            windowActive = schedSvc_->isActive(schedSvc_->ctx, SLOT_FILTR_WINDOW);
+        }
         portENTER_CRITICAL(&pendingMux_);
         filtrationWindowActive_ = windowActive;
         portEXIT_CRITICAL(&pendingMux_);

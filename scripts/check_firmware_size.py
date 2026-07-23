@@ -9,7 +9,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 FIRMWARE = ROOT / ".pio/build/Waveshare-ESP32-S3/firmware.bin"
-PARTITION_SIZE = 0x200000
+# app0/app1 in partitions_flowios3_ota_16mb.csv (N16R8 profile).
+PARTITION_SIZE = 0x400000
 
 
 def main() -> int:

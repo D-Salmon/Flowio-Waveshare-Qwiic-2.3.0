@@ -891,6 +891,7 @@ bool FirmwareUpdateModule::runSupervisorUpdate_(const char* url, char* errOut, s
             }
 
             onProgressChunk_((uint32_t)wr);
+            delay(1);
 
             if (contentLength > 0) {
                 remaining -= rd;
@@ -1124,6 +1125,7 @@ bool FirmwareUpdateModule::runSpiffsUpdate_(const char* url, char* errOut, size_
             }
 
             onProgressChunk_((uint32_t)wr);
+            delay(1);
 
             if (contentLength > 0) {
                 remaining -= rd;

@@ -25,11 +25,11 @@ fermee avec `Cle publique OTA non provisionnee`.
 ## 3. Signer un artefact
 
 ```sh
-python scripts/sign_ota.py binary/esp32s3-2.2.0.bin \
+python scripts/sign_ota.py binary/esp32s3-2.3.0.bin \
   --private-key /chemin/protege/flowio-ota-private.pem
 ```
 
-Le script produit `esp32s3-2.2.0.bin.sig`, qui contient la signature DER encodee
+Le script produit `esp32s3-2.3.0.bin.sig`, qui contient la signature DER encodee
 en Base64. Signer separement l'image SPIFFS.
 
 ## 4. Installer

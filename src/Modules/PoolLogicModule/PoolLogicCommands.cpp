@@ -106,6 +106,15 @@ bool PoolLogicModule::cmdFiltrationRecalcStatic_(void* userCtx,
     return self->cmdFiltrationRecalc_(req, reply, replyLen);
 }
 
+bool PoolLogicModule::cmdDisinfectionModeSetStatic_(void* userCtx,
+                                                    const CommandRequest& req,
+                                                    char* reply,
+                                                    size_t replyLen)
+{
+    PoolLogicModule* self = static_cast<PoolLogicModule*>(userCtx);
+    return self && self->cmdDisinfectionModeSet_(req, reply, replyLen);
+}
+
 bool PoolLogicModule::cmdMqttControlStatic_(void* userCtx,
                                             const CommandRequest& req,
                                             char* reply,
@@ -170,9 +179,9 @@ bool PoolLogicModule::cmdFiltrationRecalc_(const CommandRequest&, char* reply, s
         return false;
     }
 
-    // Match scheduler-trigger behavior: queue the recalc and let loop() own execution.
+    // Explicit maintenance command: recalculate and apply immediately.
     portENTER_CRITICAL(&pendingMux_);
-    pendingDailyRecalc_ = true;
+    pendingManualRecalc_ = true;
     portEXIT_CRITICAL(&pendingMux_);
 
     snprintf(reply, replyLen, "{\"ok\":true,\"queued\":true}");
@@ -206,6 +215,44 @@ bool PoolLogicModule::cmdAutoModeSet_(const CommandRequest& req, char* reply, si
     autoMode_ = requested;
 
     snprintf(reply, replyLen, "{\"ok\":true,\"value\":%s}", requested ? "true" : "false");
+    return true;
+}
+
+bool PoolLogicModule::cmdDisinfectionModeSet_(const CommandRequest& req,
+                                              char* reply,
+                                              size_t replyLen)
+{
+    if (!cfgStore_) {
+        writeCmdError_(reply, replyLen, "poollogic.disinfection_mode.set", ErrorCode::NotReady);
+        return false;
+    }
+    JsonObjectConst args;
+    if (!parseCmdArgsObject_(req, args) || !args["value"].is<const char*>()) {
+        writeCmdError_(reply, replyLen, "poollogic.disinfection_mode.set", ErrorCode::MissingValue);
+        return false;
+    }
+    const char* value = args["value"].as<const char*>();
+    bool electrolysis = false;
+    bool liquidChlorine = false;
+    if (strcmp(value, "electrolyseur") == 0) {
+        electrolysis = true;
+    } else if (strcmp(value, "chlore_liquide") == 0) {
+        liquidChlorine = true;
+    } else if (strcmp(value, "desactive") != 0) {
+        writeCmdError_(reply, replyLen, "poollogic.disinfection_mode.set", ErrorCode::InvalidMode);
+        return false;
+    }
+
+    const bool electroStored = cfgStore_->set(electrolyseModeVar_, electrolysis);
+    const bool chlorineStored = cfgStore_->set(orpAutoModeVar_, liquidChlorine);
+    if (!electroStored || !chlorineStored) {
+        writeCmdError_(reply, replyLen, "poollogic.disinfection_mode.set", ErrorCode::Failed);
+        return false;
+    }
+    electrolyseMode_ = electrolysis;
+    orpAutoMode_ = liquidChlorine;
+    syncDisinfectionHaEntities_();
+    snprintf(reply, replyLen, "{\"ok\":true,\"value\":\"%s\"}", value);
     return true;
 }
 

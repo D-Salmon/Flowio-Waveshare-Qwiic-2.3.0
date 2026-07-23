@@ -522,6 +522,35 @@
             <div id="diagRelayStatus" class="config-status">Diagnostic relais pret.</div>
           </div>
         </div>
+        <div class="card">
+          <div class="config-section">
+            <div class="config-section-head">
+              <div>
+                <div class="control-section-title ui-heading-inline"><span class="ui-msr ui-msr-sm" aria-hidden="true">history</span><span>Journal d'activite</span></div>
+                <p class="calibration-intro">Derniers demarrages, changements de planification, commandes et blocages de securite.</p>
+              </div>
+              <div class="btn-row">
+                <button id="diagActivityRefreshBtn" class="btn-tonal" type="button"><span class="ui-msr btn-msr" aria-hidden="true">refresh</span><span>Actualiser</span></button>
+                <button id="diagActivityClearBtn" class="btn-tonal" type="button"><span class="ui-msr btn-msr" aria-hidden="true">delete_sweep</span><span>Effacer</span></button>
+              </div>
+            </div>
+            <div id="diagActivityGrid" class="status-grid"></div>
+            <div id="diagActivityStatus" class="config-status">Journal en attente.</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="config-section">
+            <div class="config-section-head">
+              <div>
+                <div class="control-section-title ui-heading-inline"><span class="ui-msr ui-msr-sm" aria-hidden="true">terminal</span><span>Demarrage du systeme</span></div>
+                <p class="calibration-intro">Premieres traces conservees en PSRAM jusqu'au demarrage complet de l'interface.</p>
+              </div>
+              <button id="diagBootLogRefreshBtn" class="btn-tonal" type="button"><span class="ui-msr btn-msr" aria-hidden="true">refresh</span><span>Actualiser</span></button>
+            </div>
+            <div id="diagBootLogGrid" class="status-grid"></div>
+            <div id="diagBootLogStatus" class="config-status">Logs de demarrage en attente.</div>
+          </div>
+        </div>
       </section>
 
       <section id="page-info" class="page">

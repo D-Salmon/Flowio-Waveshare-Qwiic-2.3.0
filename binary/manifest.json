@@ -1,6 +1,6 @@
 {
   "schema": "flowio.firmware-manifest.v2",
-  "generated_at": "2026-07-23T10:33:53+02:00",
+  "generated_at": "2026-07-23T13:46:30+02:00",
   "release": "2026.07.23",
   "artifacts": {
     "esp32s3": [
@@ -15,6 +15,18 @@
         "route": "/fwupdate/flowio",
         "size": 1619456,
         "sha256": "e104cf6c8e6cdb2fdf9d5bcc29c4b9a8a6f105160c3b7855a75df267c0abec46"
+      },
+      {
+        "title": "esp32s3",
+        "label": "esp32s3",
+        "version": "2.3.0",
+        "build_date": "2026-07-23T13:42:35+02:00",
+        "target": "esp32s3",
+        "path": "esp32s3-2.3.0.bin",
+        "kind": "esp32-firmware",
+        "route": "/fwupdate/flowio",
+        "size": 1638064,
+        "sha256": "67e96036e7a3e744ed89f8e5aa3685ea80c335ccba63ae6e7315cbd98f0790f1"
       }
     ],
     "esp32s3-spiffs": [
@@ -29,6 +41,18 @@
         "route": "/fwupdate/spiffs",
         "size": 4063232,
         "sha256": "fa33e7f90d56e81423f11781fba5528d290de4143bf87dbe6c9febe2db5fe6e3"
+      },
+      {
+        "title": "esp32s3-spiffs",
+        "label": "esp32s3-spiffs",
+        "version": "2.3.0",
+        "build_date": "2026-07-23T13:46:30+02:00",
+        "target": "spiffs",
+        "path": "esp32s3-spiffs-2.3.0.bin",
+        "kind": "esp32-spiffs",
+        "route": "/fwupdate/spiffs",
+        "size": 8257536,
+        "sha256": "6859fbfec8030b4b90f8ef279821065fee5405c8f1ff756ff2616843d1eb06b5"
       }
     ],
     "nextion": [

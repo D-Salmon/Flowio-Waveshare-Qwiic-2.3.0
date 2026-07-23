@@ -114,6 +114,7 @@ struct HaCapacitySpec {
     uint8_t numbers = 14;
     uint8_t buttons = 24;
     uint8_t discoveryCleanups = 9;
+    uint8_t selects = 4;
 };
 
 struct St7789DisplaySpec {

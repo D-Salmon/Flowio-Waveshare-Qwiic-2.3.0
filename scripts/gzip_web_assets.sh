@@ -3,12 +3,14 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+python_bin="${PYTHON:-python3}"
+
 if [[ -f "scripts/generate_config_docs.py" ]]; then
-  python3 scripts/generate_config_docs.py
+  PIOENV=Waveshare-ESP32-S3 FLOW_CFGDOC_PROFILE=flowios3 "$python_bin" scripts/generate_config_docs.py
 fi
 
 if [[ -f "scripts/generate_cfgdoc_chunks.py" ]]; then
-  python3 scripts/generate_cfgdoc_chunks.py
+  PIOENV=Waveshare-ESP32-S3 FLOW_CFGDOC_PROFILE=flowios3 "$python_bin" scripts/generate_cfgdoc_chunks.py
 fi
 
 assets=(

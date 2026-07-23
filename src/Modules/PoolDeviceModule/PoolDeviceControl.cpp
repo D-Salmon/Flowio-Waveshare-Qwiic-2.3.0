@@ -85,6 +85,8 @@ PoolDeviceSvcStatus PoolDeviceModule::svcWriteDesiredImpl_(uint8_t slot, uint8_t
     if (!runtimeReady_) return POOLDEV_SVC_ERR_NOT_READY;
 
     const bool requested = (on != 0U);
+    const bool wasActualOn = s.actualOn;
+    const uint8_t previousBlockReason = s.blockReason;
     const bool maxUptimeReached = maxUptimeReached_(s);
     if (requested) {
         if (!s.def.enabled) {
@@ -94,11 +96,27 @@ PoolDeviceSvcStatus PoolDeviceModule::svcWriteDesiredImpl_(uint8_t slot, uint8_t
         if (maxUptimeReached) {
             s.blockReason = POOL_DEVICE_BLOCK_MAX_UPTIME;
             logStartInterlock_(slot, s.blockReason);
+            if (previousBlockReason != s.blockReason) {
+                emitDeviceActivity_(slot,
+                                    ActivityCode::InterlockTriggered,
+                                    false,
+                                    ActivitySeverity::Warning,
+                                    ActivitySource::Safety,
+                                    "Duree maximale quotidienne atteinte");
+            }
             return POOLDEV_SVC_ERR_MAX_UPTIME;
         }
         if (!dependenciesSatisfied_(slot)) {
             s.blockReason = POOL_DEVICE_BLOCK_INTERLOCK;
             logStartInterlock_(slot, s.blockReason);
+            if (previousBlockReason != s.blockReason) {
+                emitDeviceActivity_(slot,
+                                    ActivityCode::InterlockTriggered,
+                                    false,
+                                    ActivitySeverity::Warning,
+                                    ActivitySource::Safety,
+                                    "Demarrage bloque: filtration requise");
+            }
             return POOLDEV_SVC_ERR_INTERLOCK;
         }
     }
@@ -115,6 +133,14 @@ PoolDeviceSvcStatus PoolDeviceModule::svcWriteDesiredImpl_(uint8_t slot, uint8_t
             tickDevices_(millis(), false);
             return POOLDEV_SVC_ERR_IO;
         }
+    }
+    if (wasActualOn != s.actualOn) {
+        emitDeviceActivity_(slot,
+                            s.actualOn ? ActivityCode::DeviceStarted : ActivityCode::DeviceStopped,
+                            s.actualOn,
+                            ActivitySeverity::Success,
+                            ActivitySource::System,
+                            s.actualOn ? "Sortie activee" : "Sortie arretee");
     }
 
     tickDevices_(millis(), false);
@@ -457,6 +483,7 @@ void PoolDeviceModule::tickDevices_(uint32_t nowMs, bool allowPersist)
         PoolDeviceSlot& s = slots_[i];
         if (!s.used) continue;
         const bool wasActualOn = s.actualOn;
+        const uint8_t previousBlockReason = s.blockReason;
         bool stateChanged = false;
         bool metricsChanged = (pending != 0U) || s.forceMetricsCommit;
         s.forceMetricsCommit = false;
@@ -574,6 +601,27 @@ void PoolDeviceModule::tickDevices_(uint32_t nowMs, bool allowPersist)
         if (wasActualOn && !s.actualOn) {
             s.persistDirty = true;
             s.persistImmediate = true;
+        }
+        if (wasActualOn != s.actualOn) {
+            emitDeviceActivity_(i,
+                                s.actualOn ? ActivityCode::DeviceStarted : ActivityCode::DeviceStopped,
+                                s.actualOn,
+                                s.blockReason == POOL_DEVICE_BLOCK_INTERLOCK
+                                    ? ActivitySeverity::Warning
+                                    : ActivitySeverity::Success,
+                                s.blockReason == POOL_DEVICE_BLOCK_INTERLOCK
+                                    ? ActivitySource::Safety
+                                    : ActivitySource::System,
+                                s.actualOn ? "Sortie activee" : "Sortie arretee");
+        }
+        if (previousBlockReason != POOL_DEVICE_BLOCK_INTERLOCK &&
+            s.blockReason == POOL_DEVICE_BLOCK_INTERLOCK) {
+            emitDeviceActivity_(i,
+                                ActivityCode::InterlockTriggered,
+                                false,
+                                ActivitySeverity::Warning,
+                                ActivitySource::Safety,
+                                "Arret de securite: filtration absente");
         }
 
         if (dataStore_) {
@@ -694,6 +742,30 @@ void PoolDeviceModule::logStartInterlock_(uint8_t slotIdx, uint8_t reason) const
              (unsigned)dep.blockReason,
              blockReasonStr_(dep.blockReason));
     }
+}
+
+void PoolDeviceModule::emitDeviceActivity_(uint8_t slotIdx,
+                                           ActivityCode code,
+                                           bool state,
+                                           ActivitySeverity severity,
+                                           ActivitySource source,
+                                           const char* detail) const
+{
+    if (!activityLog_ || !activityLog_->emit || slotIdx >= POOL_DEVICE_MAX) return;
+    const PoolDeviceSlot& slot = slots_[slotIdx];
+    if (!slot.used) return;
+
+    ActivityEvent event{};
+    event.code = (uint16_t)code;
+    event.domain = (uint8_t)ActivityDomain::PoolDevice;
+    event.source = (uint8_t)source;
+    event.severity = (uint8_t)severity;
+    event.targetSlot = slotIdx;
+    event.state = state;
+    snprintf(event.title, sizeof(event.title), "%s", slot.def.label[0] ? slot.def.label : slot.id);
+    snprintf(event.detail, sizeof(event.detail), "%s", detail ? detail : "");
+    snprintf(event.icon, sizeof(event.icon), "%s", state ? "play_arrow" : "stop");
+    (void)activityLog_->emit(activityLog_->ctx, &event);
 }
 
 bool PoolDeviceModule::maxUptimeReached_(const PoolDeviceSlot& slot)

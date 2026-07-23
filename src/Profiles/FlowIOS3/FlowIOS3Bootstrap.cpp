@@ -115,6 +115,10 @@ void registerModules(AppContext& ctx, ModuleInstances& modules)
     ctx.moduleManager.add(&modules.logHubModule);
     ctx.moduleManager.add(&modules.logDispatcherModule);
     ctx.moduleManager.add(&modules.logSerialSinkModule);
+#if FLOW_ENABLE_BOOT_LOG_CAPTURE
+    ctx.moduleManager.add(&modules.bootLogCaptureModule);
+#endif
+    ctx.moduleManager.add(&modules.activityLogModule);
     ctx.moduleManager.add(&modules.eventBusModule);
 
     ctx.moduleManager.add(&modules.configStoreModule);

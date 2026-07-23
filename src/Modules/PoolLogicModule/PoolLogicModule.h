@@ -108,6 +108,9 @@ private:
 
     static constexpr uint8_t SLOT_DAILY_RECALC = 3;
     static constexpr uint8_t SLOT_FILTR_WINDOW = 4;
+    static constexpr uint32_t FILTRATION_TEMP_SAMPLE_START_MS = 4U * 60U * 1000U;
+    static constexpr uint32_t FILTRATION_TEMP_SAMPLE_END_MS = 5U * 60U * 1000U;
+    static constexpr uint32_t FILTRATION_TEMP_SAMPLE_INTERVAL_MS = 5U * 1000U;
 
     static constexpr IoId IO_ID_PH_DEFAULT =
         PoolBinding::kSensorBindings[PoolBinding::kSensorSlotPh].ioId;
@@ -144,13 +147,12 @@ private:
     bool filtrationFeedbackMonitoringEnabled_ = false;
     bool chlorineGeneratorFeedbackMonitoringEnabled_ = false;
 
-    // Schedule / filtration window from water temperature
-    float waterTempLowThreshold_ = PoolDefaults::TempLow;
-    float waterTempSetpoint_ = PoolDefaults::TempHigh;
-    uint8_t filtrationStartMin_ = PoolDefaults::FiltrationStartMinHour;
-    uint8_t filtrationStopMax_ = PoolDefaults::FiltrationStopMaxHour;
-    uint8_t filtrationCalcStart_ = PoolDefaults::FiltrationStartMinHour;
-    uint8_t filtrationCalcStop_ = PoolDefaults::FiltrationStopMaxHour;
+    // Persisted next-cycle plan. A zero duration means that no valid plan has
+    // been calculated yet (first commissioning / factory reset).
+    uint16_t filtrationCalcStartMinute_ = 23U * 60U;
+    uint16_t filtrationCalcStopMinute_ = 60U;
+    uint16_t filtrationCalcDurationMinute_ = 0U;
+    uint16_t filtrationActiveDurationMinute_ = 0U;
 
     // Sensor IO ids for IOServiceV2 reads.
     IoId phIoId_ = IO_ID_PH_DEFAULT;
@@ -214,9 +216,16 @@ private:
     TemporalPidState orpPidState_{};
 
     bool filtrationWindowActive_ = false;
-    bool pendingDailyRecalc_ = false;
+    bool filtrationContinuous_ = false;
+    bool pendingStartupPlan_ = false;
+    bool pendingManualRecalc_ = false;
     bool pendingDayReset_ = false;
     bool pendingFiltrationReconcile_ = false;
+    bool filtrationTempSamplingArmed_ = false;
+    bool filtrationTempPlanStored_ = false;
+    uint32_t filtrationTempLastSampleMs_ = 0U;
+    float filtrationTempSampleSum_ = 0.0f;
+    uint16_t filtrationTempSampleCount_ = 0U;
 
     bool psiError_ = false;
     bool phTankLowError_ = false;
@@ -247,18 +256,12 @@ private:
     ConfigVariable<bool,0> electroRunModeVar_{NVS_KEY(NvsKeys::PoolLogic::ElectroRunMode), "elec_run", "poollogic/mode", ConfigType::Bool,
                                               &electroRunMode_, ConfigPersistence::Persistent, 0};
 
-    ConfigVariable<float,0> tempLowVar_{NVS_KEY(NvsKeys::PoolLogic::TempLow), "wat_temp_lo_th", "poollogic/filtration", ConfigType::Float,
-                                        &waterTempLowThreshold_, ConfigPersistence::Persistent, 0};
-    ConfigVariable<float,0> tempSetpointVar_{NVS_KEY(NvsKeys::PoolLogic::TempSetpoint), "wat_temp_setpt", "poollogic/filtration", ConfigType::Float,
-                                             &waterTempSetpoint_, ConfigPersistence::Persistent, 0};
-    ConfigVariable<uint8_t,0> startMinVar_{NVS_KEY(NvsKeys::PoolLogic::FiltrationStartMin), "filtr_start_min", "poollogic/filtration", ConfigType::UInt8,
-                                           &filtrationStartMin_, ConfigPersistence::Persistent, 0};
-    ConfigVariable<uint8_t,0> stopMaxVar_{NVS_KEY(NvsKeys::PoolLogic::FiltrationStopMax), "filtr_stop_max", "poollogic/filtration", ConfigType::UInt8,
-                                          &filtrationStopMax_, ConfigPersistence::Persistent, 0};
-    ConfigVariable<uint8_t,0> calcStartVar_{NVS_KEY(NvsKeys::PoolLogic::FiltrationCalcStart), "filtr_start_clc", "poollogic/filtration", ConfigType::UInt8,
-                                            &filtrationCalcStart_, ConfigPersistence::Persistent, 0};
-    ConfigVariable<uint8_t,0> calcStopVar_{NVS_KEY(NvsKeys::PoolLogic::FiltrationCalcStop), "filtr_stop_clc", "poollogic/filtration", ConfigType::UInt8,
-                                           &filtrationCalcStop_, ConfigPersistence::Persistent, 0};
+    ConfigVariable<uint16_t,0> calcStartVar_{NVS_KEY(NvsKeys::PoolLogic::FiltrationCalcStart), "filtr_start_minute", "poollogic/filtration", ConfigType::UInt16,
+                                             &filtrationCalcStartMinute_, ConfigPersistence::Persistent, 0};
+    ConfigVariable<uint16_t,0> calcStopVar_{NVS_KEY(NvsKeys::PoolLogic::FiltrationCalcStop), "filtr_stop_minute", "poollogic/filtration", ConfigType::UInt16,
+                                            &filtrationCalcStopMinute_, ConfigPersistence::Persistent, 0};
+    ConfigVariable<uint16_t,0> calcDurationVar_{NVS_KEY(NvsKeys::PoolLogic::FiltrationCalcDuration), "filtr_duration_minute", "poollogic/filtration", ConfigType::UInt16,
+                                                &filtrationCalcDurationMinute_, ConfigPersistence::Persistent, 0};
 
     ConfigVariable<IoId,0> phIdVar_{NVS_KEY(NvsKeys::PoolLogic::PhIoId), "ph_io_id", "poollogic/sensors", ConfigType::UInt16,
                                        &phIoId_, ConfigPersistence::Persistent, 0};
@@ -360,6 +363,8 @@ private:
     const PoolDeviceService* poolSvc_ = nullptr;
     const MqttService* mqttSvc_ = nullptr;
     const AlarmService* alarmSvc_ = nullptr;
+    const ActivityLogService* activityLog_ = nullptr;
+    const HAService* haSvc_ = nullptr;
     MqttConfigRouteProducer* cfgMqttPub_ = nullptr;
 
     // Lifecycle
@@ -368,14 +373,26 @@ private:
     void normalizeDeviceSlots_();
     void logDeviceSlotConfig_() const;
     void logDeviceSlotBinding_(const char* role, uint8_t slot, int8_t expectedType) const;
+    void syncDisinfectionHaEntities_();
+    void emitActivity_(ActivityCode code,
+                       const char* title,
+                       const char* detail,
+                       uint8_t slot,
+                       bool state,
+                       ActivitySeverity severity = ActivitySeverity::Info,
+                       ActivitySource source = ActivitySource::Auto) const;
 
     // Scheduler
     void ensureDailySlot_();
-    bool applyFiltrationWindowSlot_(uint8_t startHour, uint8_t stopHour);
-    bool computeFiltrationWindow_(float waterTemp, uint8_t& startHourOut, uint8_t& stopHourOut, uint8_t& durationOut);
-    bool recalcAndApplyFiltrationWindow_(uint8_t* startHourOut = nullptr,
-                                         uint8_t* stopHourOut = nullptr,
-                                         uint8_t* durationOut = nullptr);
+    bool applyFiltrationWindowSlot_(uint16_t startMinute, uint16_t stopMinute, uint16_t durationMinute);
+    bool computeFiltrationWindow_(float waterTemp,
+                                  uint16_t& startMinuteOut,
+                                  uint16_t& stopMinuteOut,
+                                  uint16_t& durationMinuteOut);
+    bool calculateAndStoreNextFiltrationPlan_(float waterTemp, bool applyImmediately);
+    bool applyStoredFiltrationPlan_();
+    void armFiltrationTemperatureSampling_();
+    void updateFiltrationTemperatureSampling_(uint32_t nowMs, bool haveWaterTemp, float waterTemp);
 
     // Control
     static AlarmCondState condPsiLowStatic_(void* ctx, uint32_t nowMs);
@@ -417,9 +434,11 @@ private:
     static bool cmdFiltrationWriteStatic_(void* userCtx, const CommandRequest& req, char* reply, size_t replyLen);
     static bool cmdFiltrationRecalcStatic_(void* userCtx, const CommandRequest& req, char* reply, size_t replyLen);
     static bool cmdAutoModeSetStatic_(void* userCtx, const CommandRequest& req, char* reply, size_t replyLen);
+    static bool cmdDisinfectionModeSetStatic_(void* userCtx, const CommandRequest& req, char* reply, size_t replyLen);
     static bool cmdMqttControlStatic_(void* userCtx, const CommandRequest& req, char* reply, size_t replyLen);
     bool cmdFiltrationWrite_(const CommandRequest& req, char* reply, size_t replyLen);
     bool cmdFiltrationRecalc_(const CommandRequest& req, char* reply, size_t replyLen);
     bool cmdAutoModeSet_(const CommandRequest& req, char* reply, size_t replyLen);
+    bool cmdDisinfectionModeSet_(const CommandRequest& req, char* reply, size_t replyLen);
     bool cmdMqttControl_(const CommandRequest& req, char* reply, size_t replyLen);
 };
