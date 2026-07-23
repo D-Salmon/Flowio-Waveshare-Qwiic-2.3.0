@@ -16,6 +16,10 @@
 #include <string.h>
 #include <time.h>
 
+#ifndef FLOW_PHYSICAL_RECOVERY_WINDOW_MS
+#define FLOW_PHYSICAL_RECOVERY_WINDOW_MS 600000U
+#endif
+
 namespace {
 template <size_t Rows, size_t Cols>
 size_t charTableUsage_(const char (&table)[Rows][Cols])
@@ -33,6 +37,21 @@ bool isFiniteNonNegative_(float value)
     return isfinite(value) && value >= 0.0f;
 }
 } // namespace
+
+void PoolDeviceModule::setPhysicalRecoveryLock(bool enabled)
+{
+    physicalRecoveryLockRequested_ = enabled;
+    physicalRecoveryLockDeadlineMs_ = enabled
+        ? millis() + (uint32_t)FLOW_PHYSICAL_RECOVERY_WINDOW_MS
+        : 0U;
+}
+
+bool PoolDeviceModule::physicalRecoveryLockActive_(uint32_t nowMs) const
+{
+    return physicalRecoveryLockRequested_ &&
+           physicalRecoveryLockDeadlineMs_ != 0U &&
+           (int32_t)(physicalRecoveryLockDeadlineMs_ - nowMs) > 0;
+}
 
 uint8_t PoolDeviceModule::activeCount_() const
 {
@@ -89,6 +108,11 @@ PoolDeviceSvcStatus PoolDeviceModule::svcWriteDesiredImpl_(uint8_t slot, uint8_t
     const uint8_t previousBlockReason = s.blockReason;
     const bool maxUptimeReached = maxUptimeReached_(s);
     if (requested) {
+        if (physicalRecoveryLockActive_(millis())) {
+            s.desiredOn = false;
+            s.blockReason = POOL_DEVICE_BLOCK_DISABLED;
+            return POOLDEV_SVC_ERR_DISABLED;
+        }
         if (!s.def.enabled) {
             s.blockReason = POOL_DEVICE_BLOCK_DISABLED;
             return POOLDEV_SVC_ERR_DISABLED;
@@ -479,6 +503,22 @@ void PoolDeviceModule::tickDevices_(uint32_t nowMs, bool allowPersist)
         requestPeriodReconcile_();
     }
 
+    const bool recoveryLocked = physicalRecoveryLockActive_(nowMs);
+    if (recoveryLocked != physicalRecoveryLockWasActive_) {
+        LOGW("Physical recovery output lock %s", recoveryLocked ? "enabled" : "released");
+        if (!recoveryLocked) {
+            for (uint8_t i = 0; i < POOL_DEVICE_MAX; ++i) {
+                PoolDeviceSlot& s = slots_[i];
+                if (s.used && s.def.enabled &&
+                    s.blockReason == POOL_DEVICE_BLOCK_DISABLED) {
+                    s.blockReason = POOL_DEVICE_BLOCK_NONE;
+                    s.stateTsMs = nowMs;
+                }
+            }
+        }
+        physicalRecoveryLockWasActive_ = recoveryLocked;
+    }
+
     for (uint8_t i = 0; i < POOL_DEVICE_MAX; ++i) {
         PoolDeviceSlot& s = slots_[i];
         if (!s.used) continue;
@@ -496,6 +536,26 @@ void PoolDeviceModule::tickDevices_(uint32_t nowMs, bool allowPersist)
         if (readIoState_(s, ioOn)) {
             if (s.actualOn != ioOn) stateChanged = true;
             s.actualOn = ioOn;
+        }
+
+        if (recoveryLocked) {
+            if (s.desiredOn) {
+                s.desiredOn = false;
+                stateChanged = true;
+            }
+            if (s.actualOn) {
+                if (writeIo_(s.ioId, false)) {
+                    s.actualOn = false;
+                    s.blockReason = POOL_DEVICE_BLOCK_DISABLED;
+                } else {
+                    s.blockReason = POOL_DEVICE_BLOCK_IO_ERROR;
+                }
+                stateChanged = true;
+            } else if (s.blockReason != POOL_DEVICE_BLOCK_IO_ERROR &&
+                       s.blockReason != POOL_DEVICE_BLOCK_DISABLED) {
+                s.blockReason = POOL_DEVICE_BLOCK_DISABLED;
+                stateChanged = true;
+            }
         }
 
         if (s.def.tankCapacityMl <= 0.0f) {

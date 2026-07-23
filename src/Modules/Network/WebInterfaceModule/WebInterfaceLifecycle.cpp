@@ -13,6 +13,27 @@
 #include <Arduino.h>
 #include <esp_heap_caps.h>
 
+void WebInterfaceModule::setPhysicalRecoveryRequested(bool requested)
+{
+    physicalRecoveryRequested_ = requested;
+    physicalRecoveryDeadlineMs_ = requested
+        ? millis() + (uint32_t)FLOW_PHYSICAL_RECOVERY_WINDOW_MS
+        : 0U;
+}
+
+bool WebInterfaceModule::physicalRecoveryActive_() const
+{
+    return physicalRecoveryRequested_ &&
+           physicalRecoveryDeadlineMs_ != 0U &&
+           (int32_t)(physicalRecoveryDeadlineMs_ - millis()) > 0;
+}
+
+uint32_t WebInterfaceModule::physicalRecoveryRemainingMs_() const
+{
+    if (!physicalRecoveryActive_()) return 0U;
+    return (uint32_t)(physicalRecoveryDeadlineMs_ - millis());
+}
+
 bool WebInterfaceModule::setPaused_(bool paused)
 {
     uartPaused_ = paused;

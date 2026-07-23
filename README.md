@@ -31,6 +31,8 @@ PlatformIO pris en charge par ce paquet.
   de regeneration des ressources Web disponibles sous Linux et Windows.
 - Suppression complete du transport d'ecran distant HMI UDP et du port 42110.
 - Limitation des echecs Digest renforcee contre les attaques multi-sources.
+- Recuperation physique des acces Web par cavalier `GPIO21`-`GND`, avec point
+  d'acces temporaire et verrouillage des relais.
 - Firmware et SPIFFS recompiles avec la version `2.3.0` integree.
 - Le firmware d'ecran Nextion reste en `2.0.7`, car son contenu n'a pas change.
 - Le travail restant avant production est consigne dans [RESTANT_A_FAIRE.md](RESTANT_A_FAIRE.md).
@@ -56,10 +58,14 @@ PlatformIO pris en charge par ce paquet.
 - MQTT chiffre et verifie par certificat (`mqtts://`, port `8883`) par defaut.
 - Transport d'ecran distant HMI UDP supprime; aucun service n'ecoute le port UDP 42110.
 - Limitation Digest durcie : 32 sources suivies, blocage par IP et plafond global.
+- MQTT refuse les identifiants vides, limite les rafales de commandes et bloque
+  les mises a jour/imports de configuration recus par MQTT.
 - Mises a jour reseau non signees refusees par defaut.
 - Dependances PlatformIO epinglees, manifeste exhaustif avec SHA-256 et controle de release automatise.
 
 Voir [docs/security-hardening.md](docs/security-hardening.md) pour les details et les limites restantes.
+La configuration du compte et des ACL Mosquitto est detaillee dans
+[docs/mqtt-hardening.md](docs/mqtt-hardening.md).
 
 ### Fonctions de la 2.0.6
 
@@ -112,6 +118,31 @@ Installer le firmware et le SPIFFS par USB. Ne reactiver la mise a jour reseau q
 | --- | --- |
 | SDA | `GPIO42` |
 | SCL | `GPIO41` |
+
+### Cavalier de recuperation des acces
+
+Le connecteur du Waveshare expose `GPIO21` a cote d'une broche `GND`; ces deux
+broches peuvent recevoir un cavalier amovible. `GPIO21` est reserve a la
+recuperation et reste configure en entree avec pull-up interne. Ne jamais lui
+appliquer de tension externe.
+
+Procedure:
+
+1. Couper l'alimentation du controleur.
+2. Poser le cavalier entre `GPIO21` et `GND`.
+3. Remettre sous tension. Le niveau bas doit rester stable pendant `500 ms`.
+4. Se connecter au point d'acces ouvert `FlowIO-RECOVERY-xxxxxx`, puis ouvrir
+   `http://192.168.4.1/rescue`.
+5. Remplacer l'utilisateur et le mot de passe Web; le Wi-Fi et MQTT peuvent
+   aussi etre reconfigures si necessaire.
+6. Retirer le cavalier avant le redemarrage annonce par l'interface.
+
+La fenetre dure dix minutes. Pendant ce temps, les huit sorties de piscine
+restent arretees et les demandes d'allumage sont refusees. Le point d'acces est
+volontairement ouvert parce que la possession physique du cavalier constitue
+l'autorisation; il ne faut donc pas laisser le cavalier en place. Si aucun
+changement n'est effectue, le point d'acces se ferme et le fonctionnement normal
+reprend a l'expiration.
 
 ### Entrees de surveillance des contacteurs
 

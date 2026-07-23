@@ -32,12 +32,14 @@ public:
     void onStart(ConfigStore& cfg, ServiceRegistry& services) override;
     void loop() override;
     uint32_t startDelayMs() const override { return Limits::Boot::WifiProvisioningStartDelayMs; }
+    void setPhysicalRecoveryRequested(bool requested);
 
 private:
     enum class PortalReason : uint8_t {
         None = 0,
         MissingCredentials = 1,
-        ConnectTimeout = 2
+        ConnectTimeout = 2,
+        PhysicalRecovery = 3
     };
 
 #if defined(FLOW_PROFILE_MICRONOVA)
@@ -63,11 +65,14 @@ private:
     bool configDirty_ = false;
     bool portalLatched_ = false;
     bool staProbeActive_ = false;
+    bool physicalRecoveryRequested_ = false;
+    bool physicalRecoveryActive_ = false;
     uint8_t apClientCount_ = 0;
     uint32_t lastApClientSeenMs_ = 0;
     uint32_t lastApClientPollMs_ = 0;
     uint32_t lastStaProbeStartMs_ = 0;
     uint32_t bootMs_ = 0;
+    uint32_t physicalRecoveryDeadlineMs_ = 0;
     uint32_t lastCfgPollMs_ = 0;
     wifi_event_id_t wifiEventHandlerId_ = 0;
     char apSsid_[40] = {0};
@@ -89,7 +94,8 @@ private:
     static void onWifiEventSys_(arduino_event_t* event);
     void onWifiEvent_(arduino_event_t* event);
     bool startCaptivePortal_(PortalReason reason);
-    void stopCaptivePortal_();
+    void stopCaptivePortal_(const char* reason = "station connected");
+    bool isPhysicalRecoveryActive_(uint32_t nowMs) const;
     bool isStaConnected_() const;
     bool getStaIp_(char* out, size_t len) const;
     bool getApIp_(char* out, size_t len) const;

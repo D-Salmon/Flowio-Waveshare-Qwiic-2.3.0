@@ -179,6 +179,18 @@ constexpr uint32_t ConnectTimeoutMs = 10000;
 constexpr uint32_t LoopDelayMs = 50;
 }  // namespace Timing
 
+/** @brief MQTT inbound-command security limits. */
+namespace Security {
+/** @brief Fixed activity window used to detect command bursts. */
+constexpr uint32_t InboundWindowMs = 10000U;
+/** @brief Maximum accepted inbound messages during one activity window. */
+constexpr uint8_t InboundMaxPerWindow = 12U;
+/** @brief Temporary block applied after the inbound limit is exceeded. */
+constexpr uint32_t InboundBlockMs = 60000U;
+/** @brief Minimum spacing between rate-limit acknowledgements and repeated logs. */
+constexpr uint32_t InboundRejectReportMs = 5000U;
+}  // namespace Security
+
 /** @brief MQTT reconnect backoff profile. */
 namespace Backoff {
 /** @brief Minimum MQTT reconnect backoff in ms (`MQTTModule` error-wait state). */

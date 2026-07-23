@@ -24,9 +24,31 @@
 #define snprintf(OUT, LEN, FMT, ...) \
     FLOW_SNPRINTF_CHECKED_MODULE((LogModuleId)LogModuleIdValue::Core, OUT, LEN, FMT, ##__VA_ARGS__)
 
+#ifndef FLOW_PHYSICAL_RECOVERY_PIN
+#define FLOW_PHYSICAL_RECOVERY_PIN 21
+#endif
+
+#ifndef FLOW_PHYSICAL_RECOVERY_DETECT_MS
+#define FLOW_PHYSICAL_RECOVERY_DETECT_MS 500U
+#endif
+
 namespace {
 
 using Profiles::FlowIOS3::ModuleInstances;
+
+bool detectPhysicalRecoveryJumper()
+{
+    pinMode(FLOW_PHYSICAL_RECOVERY_PIN, INPUT_PULLUP);
+    delay(20);
+    if (digitalRead(FLOW_PHYSICAL_RECOVERY_PIN) != LOW) return false;
+
+    const uint32_t startedMs = millis();
+    while ((uint32_t)(millis() - startedMs) < (uint32_t)FLOW_PHYSICAL_RECOVERY_DETECT_MS) {
+        if (digitalRead(FLOW_PHYSICAL_RECOVERY_PIN) != LOW) return false;
+        delay(10);
+    }
+    return true;
+}
 
 const PoolDevicePreset* findPoolPresetByRole(const DomainSpec& domain, DomainRole role)
 {
@@ -195,6 +217,18 @@ void setupProfile(AppContext& ctx)
 
     Serial.begin(Board::SerialMap::uart0Baud());
     delay(50);
+
+    const bool physicalRecovery = detectPhysicalRecoveryJumper();
+    modules.wifiProvisioningModule.setPhysicalRecoveryRequested(physicalRecovery);
+    modules.webInterfaceModule.setPhysicalRecoveryRequested(physicalRecovery);
+    modules.poolDeviceModule.setPhysicalRecoveryLock(physicalRecovery);
+    if (physicalRecovery) {
+        Serial.printf(
+            "\r\n[SECURITY] Physical access recovery requested: GPIO%d held to GND for %lu ms\r\n",
+            (int)FLOW_PHYSICAL_RECOVERY_PIN,
+            (unsigned long)FLOW_PHYSICAL_RECOVERY_DETECT_MS);
+        Serial.println("[SECURITY] Pool outputs remain OFF during the recovery window.");
+    }
 
     ctx.preferences.begin(NvsKeys::StorageNamespace, false);
     ctx.registry.setPreferences(ctx.preferences);

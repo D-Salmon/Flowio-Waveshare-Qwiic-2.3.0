@@ -64,6 +64,7 @@ public:
     void loop() override;
 
     bool defineDevice(const PoolDeviceDefinition& def);
+    void setPhysicalRecoveryLock(bool enabled);
     const char* deviceLabel(uint8_t idx) const;
     uint8_t runtimeSnapshotCount() const override;
     const char* runtimeSnapshotSuffix(uint8_t idx) const override;
@@ -184,6 +185,9 @@ private:
 
     // State and configuration storage
     bool runtimeReady_ = false;
+    bool physicalRecoveryLockRequested_ = false;
+    bool physicalRecoveryLockWasActive_ = false;
+    uint32_t physicalRecoveryLockDeadlineMs_ = 0U;
     portMUX_TYPE resetMux_ = portMUX_INITIALIZER_UNLOCKED;
     uint8_t resetPendingMask_ = 0;
     bool periodReconcilePending_ = true;
@@ -218,4 +222,6 @@ private:
     ConfigVariable<float,0> cfgTankInitVar_[POOL_DEVICE_MAX]{};
     ConfigVariable<int32_t,0> cfgMaxUptimeVar_[POOL_DEVICE_MAX]{};
     ConfigVariable<char,0> cfgRuntimeVar_[POOL_DEVICE_MAX]{};
+
+    bool physicalRecoveryLockActive_(uint32_t nowMs) const;
 };
