@@ -148,6 +148,21 @@ void WebInterfaceModule::onWsLogEvent_(AsyncWebSocket*,
             client->text(flowSource
                 ? "[webinterface] logs connectes source=flowio"
                 : "[webinterface] logs connectes source=supervisor");
+#if FLOW_ENABLE_BOOT_LOG_CAPTURE
+            const BootLogCaptureService* bootLog = bootLogCaptureService();
+            if (bootLog && bootLog->getStats) {
+                BootLogCaptureStats stats{};
+                bootLog->getStats(bootLog->ctx, &stats);
+                char summary[112] = {0};
+                snprintf(summary,
+                         sizeof(summary),
+                         "[webinterface] bootlog entries=%u/%u dropped=%lu",
+                         (unsigned)stats.count,
+                         (unsigned)stats.capacity,
+                         (unsigned long)stats.droppedCount);
+                client->text(summary);
+            }
+#endif
         }
         LOGI("wslog connect id=%lu clients=%u connects=%lu",
              (unsigned long)(client ? client->id() : 0U),

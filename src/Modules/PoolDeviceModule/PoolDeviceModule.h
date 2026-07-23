@@ -148,6 +148,12 @@ private:
     bool persistMetrics_(uint8_t slotIdx, PoolDeviceSlot& slot, uint32_t nowMs);
     bool dependenciesSatisfied_(uint8_t slotIdx) const;
     void logStartInterlock_(uint8_t slotIdx, uint8_t reason) const;
+    void emitDeviceActivity_(uint8_t slotIdx,
+                             ActivityCode code,
+                             bool state,
+                             ActivitySeverity severity,
+                             ActivitySource source,
+                             const char* detail) const;
     static bool maxUptimeReached_(const PoolDeviceSlot& slot);
     bool readIoState_(const PoolDeviceSlot& slot, bool& onOut) const;
     bool writeIo_(IoId ioId, bool on);
@@ -191,6 +197,7 @@ private:
     const CommandService* cmdSvc_ = nullptr;
     const MqttService* mqttSvc_ = nullptr;
     const HAService* haSvc_ = nullptr;
+    const ActivityLogService* activityLog_ = nullptr;
     PoolDeviceService poolSvc_{
         ServiceBinding::bind<&PoolDeviceModule::activeCount_>,
         ServiceBinding::bind<&PoolDeviceModule::svcMetaImpl_>,

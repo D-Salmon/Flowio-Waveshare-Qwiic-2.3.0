@@ -1676,6 +1676,13 @@
     const diagPressureStatus = document.getElementById('diagPressureStatus');
     const diagRelayGrid = document.getElementById('diagRelayGrid');
     const diagRelayStatus = document.getElementById('diagRelayStatus');
+    const diagActivityGrid = document.getElementById('diagActivityGrid');
+    const diagActivityStatus = document.getElementById('diagActivityStatus');
+    const diagActivityRefreshBtn = document.getElementById('diagActivityRefreshBtn');
+    const diagActivityClearBtn = document.getElementById('diagActivityClearBtn');
+    const diagBootLogGrid = document.getElementById('diagBootLogGrid');
+    const diagBootLogStatus = document.getElementById('diagBootLogStatus');
+    const diagBootLogRefreshBtn = document.getElementById('diagBootLogRefreshBtn');
     const diagStatusChip = document.getElementById('diagStatusChip');
     const flowCfgTreePane = flowCfgTree ? flowCfgTree.closest('.cfg-pane') : null;
     const flowCfgDetailPane = flowCfgFields ? flowCfgFields.closest('.cfg-pane') : null;
@@ -9477,9 +9484,125 @@
       diagnosticRelayTimer = null;
     }
 
+    function setDiagnosticActivityStatus(message, tone) {
+      if (!diagActivityStatus) return;
+      diagActivityStatus.textContent = String(message || 'Journal en attente.');
+      diagActivityStatus.className = 'config-status';
+      if (tone === 'error') diagActivityStatus.classList.add('is-error');
+      if (tone === 'ok') diagActivityStatus.classList.add('is-ok');
+      if (tone === 'busy') diagActivityStatus.classList.add('is-busy');
+    }
+
+    function formatDiagnosticActivityTime(event) {
+      const epoch = Number(event && event.epoch);
+      if (Number.isFinite(epoch) && epoch > 0) {
+        return new Date(epoch * 1000).toLocaleString(currentWebLocaleTag());
+      }
+      const ms = Number(event && event.ts);
+      return Number.isFinite(ms) ? ('+' + formatInfoUptime(ms)) : '-';
+    }
+
+    function renderDiagnosticActivity(events) {
+      if (!diagActivityGrid) return;
+      diagActivityGrid.innerHTML = '';
+      const list = Array.isArray(events) ? events.slice().reverse() : [];
+      if (!list.length) {
+        diagActivityGrid.appendChild(createDiagnosticCard(
+          'Journal',
+          'Aucun evenement enregistre.',
+          true,
+          'Les prochains demarrages et changements apparaitront ici.'
+        ));
+        return;
+      }
+      list.forEach((event) => {
+        const severity = Number(event && event.severity);
+        diagActivityGrid.appendChild(createDiagnosticCard(
+          String((event && event.title) || 'Activite'),
+          String((event && event.detail) || 'Evenement systeme'),
+          severity < 2,
+          formatDiagnosticActivityTime(event)
+        ));
+      });
+    }
+
+    async function refreshDiagnosticActivity() {
+      setDiagnosticActivityStatus('Lecture du journal...', 'busy');
+      const data = await fetchOkJson('/api/activity?limit=50', { cache: 'no-store' }, 'journal indisponible');
+      renderDiagnosticActivity(data.events);
+      const stats = data && data.stats ? data.stats : {};
+      setDiagnosticActivityStatus(
+        String(Number(stats.count) || 0) + ' evenement(s), ' +
+        String(Number(stats.persisted) || 0) + ' persiste(s).',
+        'ok'
+      );
+    }
+
+    async function clearDiagnosticActivity() {
+      if (!window.confirm('Effacer tout le journal d activite ?')) return;
+      setDiagnosticActivityStatus('Effacement du journal...', 'busy');
+      await fetchOkJson(
+        '/api/activity/clear',
+        createFormPostOptions({}),
+        'effacement du journal impossible'
+      );
+      await refreshDiagnosticActivity();
+    }
+
+    function setDiagnosticBootLogStatus(message, tone) {
+      if (!diagBootLogStatus) return;
+      diagBootLogStatus.textContent = String(message || 'Logs de demarrage en attente.');
+      diagBootLogStatus.className = 'config-status';
+      if (tone === 'error') diagBootLogStatus.classList.add('is-error');
+      if (tone === 'ok') diagBootLogStatus.classList.add('is-ok');
+      if (tone === 'busy') diagBootLogStatus.classList.add('is-busy');
+    }
+
+    function renderDiagnosticBootLog(entries) {
+      if (!diagBootLogGrid) return;
+      diagBootLogGrid.innerHTML = '';
+      const list = Array.isArray(entries) ? entries : [];
+      if (!list.length) {
+        diagBootLogGrid.appendChild(createDiagnosticCard(
+          'Demarrage',
+          'Aucune trace disponible.',
+          false,
+          'La capture requiert la PSRAM N16R8.'
+        ));
+        return;
+      }
+      list.forEach((entry) => {
+        const level = Number(entry && entry.level);
+        diagBootLogGrid.appendChild(createDiagnosticCard(
+          String((entry && entry.module) || 'systeme'),
+          String((entry && entry.message) || ''),
+          level < 2,
+          '+' + formatInfoUptime(Number(entry && entry.ts) || 0)
+        ));
+      });
+    }
+
+    async function refreshDiagnosticBootLog() {
+      setDiagnosticBootLogStatus('Lecture du demarrage...', 'busy');
+      const data = await fetchOkJson('/api/logs/boot?limit=50', { cache: 'no-store' }, 'logs de demarrage indisponibles');
+      renderDiagnosticBootLog(data.entries);
+      const stats = data && data.stats ? data.stats : {};
+      setDiagnosticBootLogStatus(
+        String(Number(stats.count) || 0) + ' trace(s), capture ' +
+        (stats.complete ? 'terminee.' : 'en cours.'),
+        'ok'
+      );
+    }
+
     async function onDiagnosticPageShown() {
       startDiagnosticRelayTimer();
-      await Promise.allSettled([refreshDiagnosticNetwork(), refreshDiagnosticSensors(), runDiagnosticDs18Scan()]);
+      await Promise.allSettled([
+        refreshDiagnosticNetwork(),
+        refreshDiagnosticSensors(),
+        runDiagnosticDs18Scan(),
+        refreshDiagnosticActivity(),
+        refreshDiagnosticBootLog()
+      ]);
     }
 
     async function setDiagnosticRelay(slot, value, durationMs) {
@@ -9616,6 +9739,27 @@
           setDiagnosticPressureStatus('Configuration pression echouee : ' + err, 'error');
         } finally {
           if (diagPressureApplyBtn) diagPressureApplyBtn.disabled = false;
+        }
+      });
+      bindClickAction(diagActivityRefreshBtn, async () => {
+        try {
+          await refreshDiagnosticActivity();
+        } catch (err) {
+          setDiagnosticActivityStatus(String(err), 'error');
+        }
+      });
+      bindClickAction(diagActivityClearBtn, async () => {
+        try {
+          await clearDiagnosticActivity();
+        } catch (err) {
+          setDiagnosticActivityStatus(String(err), 'error');
+        }
+      });
+      bindClickAction(diagBootLogRefreshBtn, async () => {
+        try {
+          await refreshDiagnosticBootLog();
+        } catch (err) {
+          setDiagnosticBootLogStatus(String(err), 'error');
         }
       });
       renderDiagnosticRelayControls();

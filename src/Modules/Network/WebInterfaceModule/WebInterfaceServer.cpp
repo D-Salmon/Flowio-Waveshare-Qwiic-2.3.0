@@ -5712,6 +5712,140 @@ void WebInterfaceModule::startServer_()
         handleUpdateRequest_(request, FirmwareUpdateTarget::Spiffs);
     });
 
+    server_.on("/api/activity", HTTP_GET, [this](AsyncWebServerRequest* request) {
+        const ActivityLogService* activity =
+            services_ ? services_->get<ActivityLogService>(ServiceId::ActivityLog) : nullptr;
+        if (!activity || !activity->getStats || !activity->readPage) {
+            request->send(503, "application/json",
+                          "{\"ok\":false,\"err\":{\"code\":\"NotReady\",\"where\":\"activity\"}}");
+            return;
+        }
+
+        uint16_t offset = 0U;
+        const bool explicitOffset = request->hasParam("offset");
+        uint16_t limit = 50U;
+        if (explicitOffset) {
+            offset = (uint16_t)request->getParam("offset")->value().toInt();
+        }
+        if (request->hasParam("limit")) {
+            const long requested = request->getParam("limit")->value().toInt();
+            if (requested > 0L) limit = (uint16_t)((requested > 50L) ? 50L : requested);
+        }
+
+        ActivityLogStats stats{};
+        activity->getStats(activity->ctx, &stats);
+        if (!explicitOffset && stats.count > limit) {
+            offset = (uint16_t)(stats.count - limit);
+        }
+        AsyncResponseStream* response = request->beginResponseStream("application/json");
+        response->print("{\"ok\":true,\"stats\":{");
+        response->printf("\"count\":%u,\"capacity\":%u,\"dropped\":%lu,\"persisted\":%lu,\"persist_dropped\":%lu,\"psram\":%s,\"spiffs\":%s",
+                         (unsigned)stats.count,
+                         (unsigned)stats.capacity,
+                         (unsigned long)stats.droppedCount,
+                         (unsigned long)stats.persistedCount,
+                         (unsigned long)stats.persistDropCount,
+                         stats.psram ? "true" : "false",
+                         stats.spiffs ? "true" : "false");
+        response->print("},\"events\":[");
+
+        struct ActivityWriterContext {
+            AsyncResponseStream* response;
+            bool first;
+        } context{response, true};
+        const auto writer = [](void* raw,
+                               const ActivityEvent& event,
+                               uint16_t,
+                               uint16_t) -> bool {
+            ActivityWriterContext* ctx = static_cast<ActivityWriterContext*>(raw);
+            if (!ctx || !ctx->response) return false;
+            if (!ctx->first) ctx->response->print(',');
+            ctx->first = false;
+            StaticJsonDocument<384> doc;
+            doc["seq"] = event.seq;
+            doc["ts"] = event.tsMs;
+            doc["epoch"] = event.epochSec;
+            doc["code"] = event.code;
+            doc["domain"] = event.domain;
+            doc["source"] = event.source;
+            doc["severity"] = event.severity;
+            doc["slot"] = event.targetSlot;
+            doc["state"] = event.state;
+            doc["title"] = event.title;
+            doc["detail"] = event.detail;
+            doc["icon"] = event.icon;
+            serializeJson(doc, *ctx->response);
+            return true;
+        };
+        activity->readPage(activity->ctx, offset, limit, writer, &context);
+        response->print("]}");
+        request->send(response);
+    });
+
+    server_.on("/api/activity/clear", HTTP_POST, [this](AsyncWebServerRequest* request) {
+        const ActivityLogService* activity =
+            services_ ? services_->get<ActivityLogService>(ServiceId::ActivityLog) : nullptr;
+        if (!activity || !activity->clear) {
+            request->send(503, "application/json",
+                          "{\"ok\":false,\"err\":{\"code\":\"NotReady\",\"where\":\"activity.clear\"}}");
+            return;
+        }
+        const bool cleared = activity->clear(activity->ctx);
+        request->send(cleared ? 200 : 500,
+                      "application/json",
+                      cleared
+                          ? "{\"ok\":true}"
+                          : "{\"ok\":false,\"err\":{\"code\":\"Failed\",\"where\":\"activity.clear\"}}");
+    });
+
+#if FLOW_ENABLE_BOOT_LOG_CAPTURE
+    server_.on("/api/logs/boot", HTTP_GET, [](AsyncWebServerRequest* request) {
+        const BootLogCaptureService* bootLog = bootLogCaptureService();
+        if (!bootLog || !bootLog->getStats || !bootLog->readPage) {
+            request->send(503, "application/json",
+                          "{\"ok\":false,\"err\":{\"code\":\"NotReady\",\"where\":\"bootlog\"}}");
+            return;
+        }
+        BootLogCaptureStats stats{};
+        bootLog->getStats(bootLog->ctx, &stats);
+        uint16_t offset = 0U;
+        uint16_t limit = 50U;
+        if (request->hasParam("offset")) {
+            offset = (uint16_t)request->getParam("offset")->value().toInt();
+        }
+        if (request->hasParam("limit")) {
+            const long requested = request->getParam("limit")->value().toInt();
+            if (requested > 0L) limit = (uint16_t)((requested > 50L) ? 50L : requested);
+        }
+        AsyncResponseStream* response = request->beginResponseStream("application/json");
+        response->printf("{\"ok\":true,\"stats\":{\"count\":%u,\"capacity\":%u,\"dropped\":%lu,\"complete\":%s},\"entries\":[",
+                         (unsigned)stats.count,
+                         (unsigned)stats.capacity,
+                         (unsigned long)stats.droppedCount,
+                         stats.complete ? "true" : "false");
+        struct BootWriterContext {
+            AsyncResponseStream* response;
+            bool first;
+        } context{response, true};
+        const auto writer = [](void* raw, const LogEntry& entry, uint16_t, uint16_t) -> bool {
+            BootWriterContext* ctx = static_cast<BootWriterContext*>(raw);
+            if (!ctx || !ctx->response) return false;
+            if (!ctx->first) ctx->response->print(',');
+            ctx->first = false;
+            StaticJsonDocument<256> doc;
+            doc["ts"] = entry.ts_ms;
+            doc["level"] = (uint8_t)entry.lvl;
+            doc["module"] = entry.moduleId;
+            doc["message"] = entry.msg;
+            serializeJson(doc, *ctx->response);
+            return true;
+        };
+        bootLog->readPage(bootLog->ctx, offset, limit, writer, &context);
+        response->print("]}");
+        request->send(response);
+    });
+#endif
+
     server_.onNotFound([this, webInterfaceLandingUrl](AsyncWebServerRequest* request) {
         noteHttpActivity_();
         request->redirect(webInterfaceLandingUrl());
@@ -5739,6 +5873,9 @@ void WebInterfaceModule::startServer_()
     }
     server_.begin();
     started_ = true;
+#if FLOW_ENABLE_BOOT_LOG_CAPTURE
+    markBootLogCaptureComplete();
+#endif
     noteServerStarted_();
     LOGI("WebInterface server started, listening on 0.0.0.0:%d", kServerPort);
 
@@ -5918,6 +6055,9 @@ void WebInterfaceModule::handleLocalUpdateUpload_(AsyncWebServerRequest* request
             snprintf(localUpdateError_, sizeof(localUpdateError_), "Ecriture flash incomplete: %s", Update.errorString());
             Update.abort();
         }
+        // Flash writes can be long on large images; let the network and
+        // watchdog tasks run between upload chunks.
+        delay(1);
     }
 
     if (final) {

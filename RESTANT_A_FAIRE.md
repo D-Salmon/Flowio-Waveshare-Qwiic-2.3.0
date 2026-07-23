@@ -2,14 +2,18 @@
 
 ## Etat actuel
 
-La version `2.2.0` est une edition durcie et allegee consacree au controleur
-Waveshare ESP32-S3 avec bus Qwiic. Elle contient un seul profil PlatformIO,
+La version `2.3.0` est une edition durcie et allegee consacree au controleur
+Waveshare ESP32-S3 N16R8 avec bus Qwiic. Elle contient un seul profil PlatformIO,
 ainsi que le firmware ESP32-S3, le SPIFFS et le firmware compatible de l'ecran
 Nextion.
 
 Cette version convient aux essais sur banc et a un pilote controle, administre
 par USB sur un reseau local isole. Elle ne doit pas etre exposee directement a
 Internet.
+
+L'acces nomade doit passer par Home Assistant ou un VPN. Le serveur embarque
+reste en HTTP sans TLS et ne doit pas faire l'objet d'une redirection de port
+depuis Internet.
 
 ## Priorite immediate
 

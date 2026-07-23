@@ -7,19 +7,31 @@ transformer un Raspberry Pi 3B+ sous Raspberry Pi OS Lite 32 bits en afficheur
 tactile Flow.io. L'installation configure Chromium en mode kiosk, le démarrage
 automatique et la mise en veille de l'écran.
 
-## Version Waveshare Qwiic 2.2.0
+## Version Waveshare Qwiic 2.3.0
 
 Cette edition allegee cible exclusivement le Waveshare ESP32-S3 avec modules
 Qwiic/I2C. Les profils, modules, simulations et interfaces Nextion des autres
 produits ont ete retires; `Waveshare-ESP32-S3` est le seul environnement
 PlatformIO pris en charge par ce paquet.
 
-### Version 2.2.0
+### Version 2.3.0
 
-- Edition durcie et allegee dediee au controleur Waveshare ESP32-S3.
+- Profil materiel `ESP32-S3-WROOM-1-N16R8` : flash 16 Mo et PSRAM octale 8 Mo.
+- Nouvelle planification de filtration calculee a partir de la temperature de
+  l'eau, centree sur 15 h, avec cycle nocturne de 2 h sous 12 degres et
+  fonctionnement continu a partir de 30 degres.
+- La temperature est moyennee apres cinq minutes de filtration pour calculer
+  le cycle suivant; le plan est conserve apres redemarrage.
+- Journal d'activite persistant et capture paginee des logs de demarrage,
+  consultables dans la page Diagnostics.
+- Home Assistant utilise un selecteur unique pour choisir `desactive`,
+  `electrolyseur` ou `chlore_liquide`; les entites sans rapport avec le mode
+  choisi sont retirees automatiquement.
+- Ecritures OTA decoupees avec restitution reguliere du processeur et scripts
+  de regeneration des ressources Web disponibles sous Linux et Windows.
 - Suppression complete du transport d'ecran distant HMI UDP et du port 42110.
 - Limitation des echecs Digest renforcee contre les attaques multi-sources.
-- Firmware et SPIFFS recompiles avec la version `2.2.0` integree.
+- Firmware et SPIFFS recompiles avec la version `2.3.0` integree.
 - Le firmware d'ecran Nextion reste en `2.0.7`, car son contenu n'a pas change.
 - Le travail restant avant production est consigne dans [RESTANT_A_FAIRE.md](RESTANT_A_FAIRE.md).
 
@@ -81,8 +93,8 @@ Installer le firmware et le SPIFFS par USB. Ne reactiver la mise a jour reseau q
 
 ### Fichiers a flasher
 
-- `binary/esp32s3-2.2.0.bin` : firmware Waveshare ESP32-S3.
-- `binary/esp32s3-spiffs-2.2.0.bin` : interface web / SPIFFS.
+- `binary/esp32s3-2.3.0.bin` : firmware Waveshare ESP32-S3 N16R8.
+- `binary/esp32s3-spiffs-2.3.0.bin` : interface web / SPIFFS.
 - `binary/Flowio_Nextion_800x480-v2.0.7.tft` : firmware de l'ecran Nextion 800x480.
 - `nextion/src/Flowio_Nextion_800x480_v2_0_7_working.HMI` : source modifiable avec Nextion Editor.
 

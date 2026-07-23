@@ -7,87 +7,79 @@ void test_temp_below_low_uses_min_duration()
 {
     FiltrationWindowInput in{};
     in.waterTemp = 5.0f;
-    in.lowThreshold = 12.0f;
-    in.setpoint = 24.0f;
-    in.startMinHour = 8;
-    in.stopMaxHour = 23;
 
     FiltrationWindowOutput out{};
     TEST_ASSERT_TRUE(computeFiltrationWindowDeterministic(in, out));
-    TEST_ASSERT_EQUAL_UINT8(2, out.durationHours);
-    TEST_ASSERT_EQUAL_UINT8(14, out.startHour);
-    TEST_ASSERT_EQUAL_UINT8(16, out.stopHour);
+    TEST_ASSERT_EQUAL_UINT16(120, out.durationMinutes);
+    TEST_ASSERT_EQUAL_UINT16(23 * 60, out.startMinuteOfDay);
+    TEST_ASSERT_EQUAL_UINT16(60, out.stopMinuteOfDay);
+    TEST_ASSERT_FALSE(out.continuous);
 }
 
-void test_temp_equal_setpoint_switches_to_high_factor()
+void test_24c_runs_twelve_hours_centered_on_15h()
 {
     FiltrationWindowInput in{};
     in.waterTemp = 24.0f;
-    in.lowThreshold = 12.0f;
-    in.setpoint = 24.0f;
-    in.startMinHour = 8;
-    in.stopMaxHour = 23;
 
     FiltrationWindowOutput out{};
     TEST_ASSERT_TRUE(computeFiltrationWindowDeterministic(in, out));
-    // 24 * 0.5 = 12h
-    TEST_ASSERT_EQUAL_UINT8(12, out.durationHours);
-    TEST_ASSERT_EQUAL_UINT8(9, out.startHour);
-    TEST_ASSERT_EQUAL_UINT8(21, out.stopHour);
+    TEST_ASSERT_EQUAL_UINT16(12 * 60, out.durationMinutes);
+    TEST_ASSERT_EQUAL_UINT16(9 * 60, out.startMinuteOfDay);
+    TEST_ASSERT_EQUAL_UINT16(21 * 60, out.stopMinuteOfDay);
+}
+
+void test_27c_uses_two_thirds_rule()
+{
+    FiltrationWindowInput in{};
+    in.waterTemp = 27.0f;
+
+    FiltrationWindowOutput out{};
+    TEST_ASSERT_TRUE(computeFiltrationWindowDeterministic(in, out));
+    TEST_ASSERT_EQUAL_UINT16(18 * 60, out.durationMinutes);
+    TEST_ASSERT_EQUAL_UINT16(6 * 60, out.startMinuteOfDay);
+    TEST_ASSERT_EQUAL_UINT16(0, out.stopMinuteOfDay);
+}
+
+void test_29c_uses_twenty_one_hours_and_wraps_midnight()
+{
+    FiltrationWindowInput in{};
+    in.waterTemp = 29.0f;
+
+    FiltrationWindowOutput out{};
+    TEST_ASSERT_TRUE(computeFiltrationWindowDeterministic(in, out));
+    TEST_ASSERT_EQUAL_UINT16(21 * 60, out.durationMinutes);
+    TEST_ASSERT_EQUAL_UINT16(4 * 60 + 30, out.startMinuteOfDay);
+    TEST_ASSERT_EQUAL_UINT16(1 * 60 + 30, out.stopMinuteOfDay);
+}
+
+void test_30c_is_continuous()
+{
+    FiltrationWindowInput in{};
+    in.waterTemp = 30.0f;
+
+    FiltrationWindowOutput out{};
+    TEST_ASSERT_TRUE(computeFiltrationWindowDeterministic(in, out));
+    TEST_ASSERT_EQUAL_UINT16(24 * 60, out.durationMinutes);
+    TEST_ASSERT_TRUE(out.continuous);
 }
 
 void test_nan_temperature_returns_false()
 {
     FiltrationWindowInput in{};
     in.waterTemp = NAN;
-    in.lowThreshold = 12.0f;
-    in.setpoint = 24.0f;
-    in.startMinHour = 8;
-    in.stopMaxHour = 23;
 
     FiltrationWindowOutput out{};
     TEST_ASSERT_FALSE(computeFiltrationWindowDeterministic(in, out));
-}
-
-void test_stop_le_start_uses_emergency_duration_when_possible()
-{
-    FiltrationWindowInput in{};
-    in.waterTemp = 20.0f; // duration about 7h
-    in.lowThreshold = 12.0f;
-    in.setpoint = 24.0f;
-    in.startMinHour = 22;
-    in.stopMaxHour = 22; // force stop clamp to start
-
-    FiltrationWindowOutput out{};
-    TEST_ASSERT_TRUE(computeFiltrationWindowDeterministic(in, out));
-    TEST_ASSERT_EQUAL_UINT8(22, out.startHour);
-    TEST_ASSERT_EQUAL_UINT8(23, out.stopHour);
-    TEST_ASSERT_EQUAL_UINT8(1, out.durationHours);
-}
-
-void test_stop_le_start_with_late_start_uses_fallback_window()
-{
-    FiltrationWindowInput in{};
-    in.waterTemp = 20.0f;
-    in.lowThreshold = 12.0f;
-    in.setpoint = 24.0f;
-    in.startMinHour = 23;
-    in.stopMaxHour = 23; // start gets pinned to 23
-
-    FiltrationWindowOutput out{};
-    TEST_ASSERT_TRUE(computeFiltrationWindowDeterministic(in, out));
-    TEST_ASSERT_EQUAL_UINT8(22, out.startHour);
-    TEST_ASSERT_EQUAL_UINT8(23, out.stopHour);
-    TEST_ASSERT_EQUAL_UINT8(1, out.durationHours);
 }
 
 int main()
 {
     UNITY_BEGIN();
     RUN_TEST(test_temp_below_low_uses_min_duration);
-    RUN_TEST(test_temp_equal_setpoint_switches_to_high_factor);
+    RUN_TEST(test_24c_runs_twelve_hours_centered_on_15h);
+    RUN_TEST(test_27c_uses_two_thirds_rule);
+    RUN_TEST(test_29c_uses_twenty_one_hours_and_wraps_midnight);
+    RUN_TEST(test_30c_is_continuous);
     RUN_TEST(test_nan_temperature_returns_false);
-    RUN_TEST(test_stop_le_start_uses_emergency_duration_when_possible);
-    RUN_TEST(test_stop_le_start_with_late_start_uses_fallback_window);
     return UNITY_END();
 }
