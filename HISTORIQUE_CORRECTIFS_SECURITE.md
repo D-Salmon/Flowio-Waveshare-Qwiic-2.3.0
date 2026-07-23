@@ -1,7 +1,8 @@
-# Correctifs de securite - version 2.2.0
+# Historique des correctifs de securite
 
-Ce lot regroupe les corrections issues de l'audit du kit Flow.io Waveshare
-Qwiic et les changements d'architecture integres a la version 2.2.0.
+Ce document conserve la trace du premier lot de corrections issu de l'audit
+du kit Flow.io Waveshare Qwiic. Ces corrections sont reprises dans la version
+actuelle du projet.
 
 ## Corrections appliquees
 
@@ -24,8 +25,8 @@ Qwiic et les changements d'architecture integres a la version 2.2.0.
 - `scripts/verify_release.py` : `release verification: OK`.
 - Recherche des marqueurs HMI UDP dans les binaires : aucun resultat.
 
-Les tailles et sommes SHA-256 des artefacts 2.2.0 sont consignees dans
-`binary/manifest.json`.
+Les anciens binaires de ce lot ont ete retires du paquet actuel. Le fichier
+`binary/manifest.json` ne reference que les artefacts encore distribues.
 
 ## Compatibilite API
 
