@@ -20,19 +20,20 @@ uint16_t normalizeMinute_(int32_t minute)
 
 float durationHoursForTemperature_(float waterTemp)
 {
-    if (waterTemp < 12.0f) return 2.0f;
-    if (waterTemp <= 25.0f) return waterTemp * 0.5f;
-    if (waterTemp <= 28.0f) return waterTemp * (2.0f / 3.0f);
+    if (waterTemp <= 12.0f) return 2.0f;
 
-    // Continuous, kink-free transition through the values agreed for the hot
-    // range: 28 C -> 18 h 40, 29 C -> 21 h, 30 C -> 24 h.
-    if (waterTemp <= 29.0f) {
-        constexpr float at28 = 28.0f * (2.0f / 3.0f);
-        return at28 + ((waterTemp - 28.0f) * (21.0f - at28));
+    // Continuous linear rise from 2 h at 12 C to 12 h 30 at 25 C.
+    if (waterTemp <= 25.0f) {
+        return 2.0f
+             + ((waterTemp - 12.0f) * ((12.5f - 2.0f) / (25.0f - 12.0f)));
     }
+
+    // Continuous linear rise from 12 h 30 at 25 C to 24 h at 30 C.
     if (waterTemp < 30.0f) {
-        return 21.0f + ((waterTemp - 29.0f) * 3.0f);
+        return 12.5f
+             + ((waterTemp - 25.0f) * ((24.0f - 12.5f) / (30.0f - 25.0f)));
     }
+
     return 24.0f;
 }
 }  // namespace
